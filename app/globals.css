@@ -53,10 +53,18 @@ a {
 }
 
 .sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
   font-size: 15px;
   padding: 4px 10px 16px;
   letter-spacing: 0.2px;
+}
+
+.sidebar .brand-mark {
+  flex-shrink: 0;
+  color: #b9d0c4;
 }
 
 .sidebar .brand span {

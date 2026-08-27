@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { Nav } from './Nav';
 import { Filters } from './Filters';
+import { Logo } from './Logo';
 import { getFilterOptions } from '@/lib/queries';
 
 export async function PageShell({
@@ -16,8 +17,11 @@ export async function PageShell({
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          Skyla Collective
-          <span>Engineering Ops</span>
+          <Logo size={24} className="brand-mark" />
+          <div>
+            Skyla Collective
+            <span>Engineering Ops</span>
+          </div>
         </div>
         <Nav />
       </aside>

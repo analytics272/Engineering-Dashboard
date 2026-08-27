@@ -15,8 +15,10 @@ import { DATASET, safeQuery } from './bigquery';
 //   BQ_TABLE_DROPLIST, BQ_TABLE_PPM, BQ_TABLE_TRAININGS, BQ_TABLE_INCIDENTS,
 //   BQ_TABLE_REVENUE  (bare table name; dataset is prepended automatically)
 // ---------------------------------------------------------------------------
-const t = (envKey: string, fallback: string) =>
-  `${DATASET}.${process.env[envKey]?.trim() || fallback}`;
+const t = (envKey: string, fallback: string) => {
+  const name = (process.env[envKey] ?? '').replace(/[^A-Za-z0-9_\-.]/g, '').trim();
+  return `${DATASET}.${name || fallback}`;
+};
 
 export const TABLES = {
   tickets: t('BQ_TABLE_TICKETS', 'raw_eng_tickets'),

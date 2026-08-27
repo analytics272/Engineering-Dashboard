@@ -1,9 +1,19 @@
 import 'server-only';
 import { BigQuery } from '@google-cloud/bigquery';
 
-export const BQ_PROJECT_ID = process.env.BQ_PROJECT_ID || 'skyla-analytics';
-export const BQ_DATASET_ID = process.env.BQ_DATASET_ID || 'Skyla_Engineering_Automation';
-export const BQ_LOCATION = process.env.BQ_LOCATION || 'US';
+// Env vars pasted into .env.local / the Vercel dashboard frequently carry a
+// trailing newline or stray space. Left untrimmed, that whitespace ends up
+// spliced into a backticked `project.dataset.view` and BigQuery reports
+// "Unclosed identifier literal". Strip everything that can't be in an id.
+const envId = (key: string, fallback: string) => {
+  const v = process.env[key];
+  const cleaned = (v ?? '').replace(/[^A-Za-z0-9_\-.]/g, '').trim();
+  return cleaned || fallback;
+};
+
+export const BQ_PROJECT_ID = envId('BQ_PROJECT_ID', 'skyla-analytics');
+export const BQ_DATASET_ID = envId('BQ_DATASET_ID', 'Skyla_Engineering_Automation');
+export const BQ_LOCATION = (process.env.BQ_LOCATION || 'US').trim();
 
 /** Fully-qualified dataset prefix, e.g. `skyla-analytics.Skyla_Engineering_Automation` */
 export const DATASET = `${BQ_PROJECT_ID}.${BQ_DATASET_ID}`;

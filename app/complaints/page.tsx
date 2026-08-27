@@ -23,13 +23,13 @@ export default async function ComplaintsPage({
   const w = whereFor(filters, { property: 'property', month: 'logged_month' });
 
   const byProp = await safeQuery<ByProp>(
-    `SELECT property,
+    `SELECT COALESCE(NULLIF(TRIM(property), ''), 'Unassigned') AS property,
             SUM(total_complaints)  AS total_complaints,
             SUM(open_complaints)   AS open_complaints,
             SUM(closed_complaints) AS closed_complaints
      FROM \`${VIEWS.complaintsWeekly}\`
      ${w.clause}
-     GROUP BY property
+     GROUP BY 1
      ORDER BY total_complaints DESC`,
     w.params,
   );

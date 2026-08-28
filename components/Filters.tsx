@@ -4,6 +4,30 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
 import type { FilterOptions } from '@/lib/queries';
 
+function Pill({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className={value === 'All' ? 'pill' : 'pill pill-active'}>
+      <span>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option>All</option>
+        {options.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function Filters({ properties, categories, months }: FilterOptions) {
   const router = useRouter();
   const pathname = usePathname();
@@ -15,7 +39,7 @@ export function Filters({ properties, categories, months }: FilterOptions) {
       if (!value || value === 'All') next.delete(key);
       else next.set(key, value);
       const qs = next.toString();
-      router.push(qs ? `${pathname}?${qs}` : pathname);
+      router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname, sp],
   );
@@ -25,36 +49,12 @@ export function Filters({ properties, categories, months }: FilterOptions) {
 
   return (
     <div className="filters">
-      <label>
-        Month
-        <select value={current('month')} onChange={(e) => setParam('month', e.target.value)}>
-          <option>All</option>
-          {months.map((m) => (
-            <option key={m}>{m}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Property
-        <select value={current('property')} onChange={(e) => setParam('property', e.target.value)}>
-          <option>All</option>
-          {properties.map((p) => (
-            <option key={p}>{p}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Category
-        <select value={current('category')} onChange={(e) => setParam('category', e.target.value)}>
-          <option>All</option>
-          {categories.map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </select>
-      </label>
+      <Pill label="Month" value={current('month')} options={months} onChange={(v) => setParam('month', v)} />
+      <Pill label="Property" value={current('property')} options={properties} onChange={(v) => setParam('property', v)} />
+      <Pill label="Category" value={current('category')} options={categories} onChange={(v) => setParam('category', v)} />
       {hasAny && (
-        <button type="button" onClick={() => router.push(pathname)}>
-          Clear
+        <button type="button" className="filter-reset" onClick={() => router.push(pathname, { scroll: false })}>
+          Reset
         </button>
       )}
     </div>

@@ -96,6 +96,7 @@ export type FilterOptions = {
   properties: string[];
   categories: string[];
   months: string[];
+  lastUpdated: string | null;
   error: string | null;
 };
 
@@ -115,7 +116,7 @@ export async function getFilterOptions(): Promise<FilterOptions> {
     `SELECT DISTINCT property, category, logged_month, month_number
      FROM \`${TABLES.tickets}\``,
   );
-  if (error) return { properties: [], categories: [], months: [], error };
+  if (error) return { properties: [], categories: [], months: [], lastUpdated: null, error };
 
   const properties = clean(rows.map((r) => r.property));
   const categories = clean(rows.map((r) => r.category));
@@ -128,5 +129,12 @@ export async function getFilterOptions(): Promise<FilterOptions> {
   }
   const months = [...monthOrder.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m).slice(0, 24);
 
-  return { properties, categories, months, error: null };
+  const stamp = await safeQuery<{ ts: { value: string } | string | null }>(
+    `SELECT MAX(synced_at) AS ts FROM \`${TABLES.tickets}\``,
+  );
+  const rawTs = stamp.rows[0]?.ts;
+  const lastUpdated =
+    (typeof rawTs === 'object' && rawTs ? rawTs.value : (rawTs as string | null)) ?? null;
+
+  return { properties, categories, months, lastUpdated, error: null };
 }

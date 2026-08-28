@@ -3,6 +3,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+// Flat nav — no sub-groups. `PPM · Incidents · Training` is intentionally
+// omitted: its Appendix-A tables aren't synced yet, so the page has no data.
+// Add { href: '/operations', label: 'PPM · Incidents · Training' } back once
+// raw_eng_ppm / _trainings / _incidents exist in BigQuery.
 const PAGES = [
   { href: '/complaints', label: 'Complaints' },
   { href: '/ageing', label: 'Ageing' },
@@ -10,27 +14,19 @@ const PAGES = [
   { href: '/costing', label: 'Costing' },
   { href: '/amc', label: 'AMC' },
   { href: '/budget', label: 'Budget' },
-];
-
-const STANDALONE = [
   { href: '/assets', label: 'Asset Categories' },
-  { href: '/operations', label: 'PPM · Incidents · Training' },
 ];
 
 export function Nav() {
   const pathname = usePathname();
-  const cls = (href: string) => (pathname === href ? 'active' : undefined);
-
   return (
-    <nav>
+    <nav className="nav">
       {PAGES.map((p) => (
-        <Link key={p.href} href={p.href} className={cls(p.href)}>
-          {p.label}
-        </Link>
-      ))}
-      <div className="nav-group">More</div>
-      {STANDALONE.map((p) => (
-        <Link key={p.href} href={p.href} className={cls(p.href)}>
+        <Link
+          key={p.href}
+          href={p.href}
+          className={pathname === p.href ? 'nav-link active' : 'nav-link'}
+        >
           {p.label}
         </Link>
       ))}

@@ -51,10 +51,13 @@ export const VIEWS = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Global filters (Month, Property, Category) — Spec §5
+// Global filters — Spec §5, plus Quarter (Budget page)
 // ---------------------------------------------------------------------------
-export type Filters = { month?: string; property?: string; category?: string };
+export type FilterKey = 'month' | 'property' | 'category' | 'quarter';
+export type Filters = Partial<Record<FilterKey, string>>;
 export type SearchParams = Record<string, string | string[] | undefined>;
+
+export const DEFAULT_FILTERS: FilterKey[] = ['month', 'property', 'category'];
 
 export function parseFilters(sp: SearchParams): Filters {
   const one = (k: string) => {
@@ -62,7 +65,12 @@ export function parseFilters(sp: SearchParams): Filters {
     const s = Array.isArray(v) ? v[0] : v;
     return s && s !== 'All' ? s : undefined;
   };
-  return { month: one('month'), property: one('property'), category: one('category') };
+  return {
+    month: one('month'),
+    property: one('property'),
+    category: one('category'),
+    quarter: one('quarter'),
+  };
 }
 
 type ColMap = Partial<Record<keyof Filters, string>>;
@@ -96,6 +104,7 @@ export type FilterOptions = {
   properties: string[];
   categories: string[];
   months: string[];
+  quarters: string[];
   lastUpdated: string | null;
   error: string | null;
 };
@@ -116,7 +125,8 @@ export async function getFilterOptions(): Promise<FilterOptions> {
     `SELECT DISTINCT property, category, logged_month, month_number
      FROM \`${TABLES.tickets}\``,
   );
-  if (error) return { properties: [], categories: [], months: [], lastUpdated: null, error };
+  if (error)
+    return { properties: [], categories: [], months: [], quarters: [], lastUpdated: null, error };
 
   const properties = clean(rows.map((r) => r.property));
   const categories = clean(rows.map((r) => r.category));
@@ -129,6 +139,12 @@ export async function getFilterOptions(): Promise<FilterOptions> {
   }
   const months = [...monthOrder.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m).slice(0, 24);
 
+  // Quarters for the Budget page (raw_eng_looker_data).
+  const q = await safeQuery<{ quarter: string | null }>(
+    `SELECT DISTINCT quarter FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL ORDER BY quarter`,
+  );
+  const quarters = clean(q.rows.map((r) => r.quarter), 12);
+
   const stamp = await safeQuery<{ ts: { value: string } | string | null }>(
     `SELECT MAX(synced_at) AS ts FROM \`${TABLES.tickets}\``,
   );
@@ -136,5 +152,5 @@ export async function getFilterOptions(): Promise<FilterOptions> {
   const lastUpdated =
     (typeof rawTs === 'object' && rawTs ? rawTs.value : (rawTs as string | null)) ?? null;
 
-  return { properties, categories, months, lastUpdated, error: null };
+  return { properties, categories, months, quarters, lastUpdated, error: null };
 }

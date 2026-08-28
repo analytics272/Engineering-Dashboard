@@ -1,4 +1,5 @@
 import { Card } from './Card';
+import { text } from '@/lib/bigquery';
 
 type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
 
@@ -47,7 +48,7 @@ export function DataTable<Row extends Record<string, unknown>>({
                 <tr key={i}>
                   {columns.map((c) => (
                     <td key={c.key} className={c.numeric ? 'num' : undefined}>
-                      {c.render ? c.render(row) : String(row[c.key] ?? '—')}
+                      {c.render ? c.render(row) : text(row[c.key])}
                     </td>
                   ))}
                 </tr>

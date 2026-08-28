@@ -85,3 +85,18 @@ export function num(v: unknown): number {
   }
   return Number(v) || 0;
 }
+
+/**
+ * Coerce any BigQuery cell to display text. DATE / TIMESTAMP / NUMERIC come back
+ * as wrapper objects ({ value: '2026-06-29' }); rendering those directly is what
+ * produces "[object Object]" in a table. Null / blank become an en-dash.
+ */
+export function text(v: unknown): string {
+  if (v == null) return '—';
+  if (typeof v === 'object') {
+    const val = (v as Record<string, unknown>).value;
+    return val == null ? '—' : String(val);
+  }
+  const s = String(v).trim();
+  return s === '' ? '—' : s;
+}

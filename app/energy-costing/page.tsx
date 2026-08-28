@@ -3,7 +3,7 @@ import { KpiCard } from '@/components/KpiCard';
 import { BarChartCard } from '@/components/charts/BarChartCard';
 import { safeQuery, num } from '@/lib/bigquery';
 import { VIEWS, TABLES, parseFilters, whereFor, type SearchParams } from '@/lib/queries';
-import { fmtCurrency } from '@/lib/format';
+import { fmtCurrency, monthKey } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,16 +35,14 @@ export default async function EnergyCostingPage({
 
   const mom = await safeQuery<{
     month: string | null;
-    month_number: unknown;
     direct_category: string | null;
     cost: unknown;
   }>(
-    `SELECT month, month_number, direct_category, SUM(bill_value) AS cost
+    `SELECT month, direct_category, SUM(bill_value) AS cost
      FROM \`${TABLES.bills}\`
      WHERE direct_category IN ('Electricity Charges', 'Water')
      ${billsWhere.clause}
-     GROUP BY month, month_number, direct_category
-     ORDER BY month_number`,
+     GROUP BY month, direct_category`,
     billsWhere.params,
   );
 
@@ -52,14 +50,16 @@ export default async function EnergyCostingPage({
   const ecorVals = ecor.rows.map((r) => num(r.ecor)).filter((n) => n > 0);
   const avgEcor = ecorVals.length ? ecorVals.reduce((a, b) => a + b, 0) / ecorVals.length : null;
 
-  // pivot: row per month, columns Electricity Charges / Water
+  // pivot: row per month, columns Electricity Charges / Water (ordered by parsed label)
   const byMonth = new Map<string, Record<string, unknown>>();
   for (const r of mom.rows) {
-    const label = r.month ?? String(r.month_number ?? '');
-    if (!byMonth.has(label)) byMonth.set(label, { month: label, _n: num(r.month_number) });
-    byMonth.get(label)![r.direct_category ?? '—'] = num(r.cost);
+    if (!r.month) continue;
+    if (!byMonth.has(r.month)) byMonth.set(r.month, { month: r.month });
+    byMonth.get(r.month)![r.direct_category ?? '—'] = num(r.cost);
   }
-  const momData = [...byMonth.values()].sort((a, b) => num(a._n) - num(b._n));
+  const momData = [...byMonth.values()].sort(
+    (a, b) => monthKey(a.month as string) - monthKey(b.month as string),
+  );
 
   return (
     <PageShell title="Energy Costing">

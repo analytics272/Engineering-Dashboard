@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { Nav } from './Nav';
 import { Filters } from './Filters';
 import { Logo } from './Logo';
-import { getFilterOptions } from '@/lib/queries';
+import { getFilterOptions, DEFAULT_FILTERS, type FilterKey } from '@/lib/queries';
 
 function freshness(iso: string | null): string {
   if (!iso) return 'Live';
@@ -20,9 +20,11 @@ function freshness(iso: string | null): string {
 export async function PageShell({
   title,
   children,
+  filters = DEFAULT_FILTERS,
 }: {
   title: string;
   children: React.ReactNode;
+  filters?: FilterKey[];
 }) {
   const options = await getFilterOptions();
 
@@ -48,7 +50,7 @@ export async function PageShell({
             </span>
           </div>
           <Suspense fallback={<div className="muted">Loading filters…</div>}>
-            <Filters {...options} />
+            <Filters {...options} show={filters} />
           </Suspense>
         </div>
 

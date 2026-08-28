@@ -2,7 +2,7 @@ import { PageShell } from '@/components/PageShell';
 import { Card } from '@/components/Card';
 import { safeQuery, num } from '@/lib/bigquery';
 import { TABLES, parseFilters, whereFor, type SearchParams } from '@/lib/queries';
-import { fmtCurrency } from '@/lib/format';
+import { fmtCurrency, monthKey } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,40 +18,37 @@ export default async function CostingPage({ searchParams }: { searchParams: Sear
     property: string | null;
     category: string | null;
     month: string | null;
-    month_number: unknown;
     cost: unknown;
   }>(
-    `SELECT property, category, month, month_number, SUM(bill_value) AS cost
+    // month_number is NULL for every bills row, so it can't drive ordering.
+    // Drop rows with no property AND no category (they render as an all-dash row).
+    `SELECT property, category, month, SUM(bill_value) AS cost
      FROM \`${TABLES.bills}\`
-     ${w.clause}
-     GROUP BY property, category, month, month_number
+     WHERE (COALESCE(TRIM(property), '') != '' OR COALESCE(TRIM(category), '') != '')
+     ${w.clause.replace(/^WHERE/, 'AND')}
+     GROUP BY property, category, month
      ORDER BY property, category`,
     w.params,
   );
 
-  // ordered unique month list
-  const monthSeen = new Map<string, number>();
-  for (const r of res.rows) {
-    if (r.month) monthSeen.set(r.month, num(r.month_number));
-  }
-  const months = [...monthSeen.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m);
+  // ordered unique month list (parsed from the "MMM YY" label)
+  const months = [...new Set(res.rows.map((r) => r.month).filter(Boolean) as string[])].sort(
+    (a, b) => monthKey(a) - monthKey(b),
+  );
 
   // property|category -> { month -> cost }
   const grid = new Map<string, { property: string; category: string; cells: Map<string, number> }>();
   for (const r of res.rows) {
-    const key = `${r.property ?? '—'}||${r.category ?? '—'}`;
-    if (!grid.has(key)) {
-      grid.set(key, {
-        property: r.property ?? '—',
-        category: r.category ?? '—',
-        cells: new Map(),
-      });
-    }
+    const property = r.property?.trim() || 'Unassigned';
+    const category = r.category?.trim() || 'Uncategorised';
+    const key = `${property}||${category}`;
+    if (!grid.has(key)) grid.set(key, { property, category, cells: new Map() });
     if (r.month) grid.get(key)!.cells.set(r.month, num(r.cost));
   }
-  const gridRows = [...grid.values()].sort(
-    (a, b) => a.property.localeCompare(b.property) || a.category.localeCompare(b.category),
-  );
+  const gridRows = [...grid.values()]
+    .map((row) => ({ ...row, total: [...row.cells.values()].reduce((a, b) => a + b, 0) }))
+    .filter((row) => row.total !== 0)
+    .sort((a, b) => a.property.localeCompare(b.property) || a.category.localeCompare(b.category));
 
   return (
     <PageShell title="Costing">
@@ -74,21 +71,18 @@ export default async function CostingPage({ searchParams }: { searchParams: Sear
                 </tr>
               </thead>
               <tbody>
-                {gridRows.map((row) => {
-                  const total = [...row.cells.values()].reduce((a, b) => a + b, 0);
-                  return (
-                    <tr key={`${row.property}-${row.category}`}>
-                      <td>{row.property}</td>
-                      <td>{row.category}</td>
-                      {months.map((m) => (
-                        <td key={m} className="num">
-                          {row.cells.has(m) ? fmtCurrency(row.cells.get(m)!) : '—'}
-                        </td>
-                      ))}
-                      <td className="num">{fmtCurrency(total)}</td>
-                    </tr>
-                  );
-                })}
+                {gridRows.map((row) => (
+                  <tr key={`${row.property}-${row.category}`}>
+                    <td>{row.property}</td>
+                    <td>{row.category}</td>
+                    {months.map((m) => (
+                      <td key={m} className="num">
+                        {row.cells.has(m) ? fmtCurrency(row.cells.get(m)!) : '—'}
+                      </td>
+                    ))}
+                    <td className="num">{fmtCurrency(row.total)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

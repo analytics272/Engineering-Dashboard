@@ -2,7 +2,7 @@
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
-import type { FilterOptions } from '@/lib/queries';
+import type { FilterKey, FilterOptions } from '@/lib/queries';
 
 function Pill({
   label,
@@ -28,7 +28,13 @@ function Pill({
   );
 }
 
-export function Filters({ properties, categories, months }: FilterOptions) {
+export function Filters({
+  properties,
+  categories,
+  months,
+  quarters,
+  show = ['month', 'property', 'category'],
+}: FilterOptions & { show?: FilterKey[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -45,15 +51,38 @@ export function Filters({ properties, categories, months }: FilterOptions) {
   );
 
   const current = (key: string) => sp.get(key) ?? 'All';
-  const hasAny = ['month', 'property', 'category'].some((k) => sp.get(k));
+  const hasAny = show.some((k) => sp.get(k));
+
+  const optionsFor: Record<FilterKey, string[]> = {
+    month: months,
+    property: properties,
+    category: categories,
+    quarter: quarters,
+  };
+  const labelFor: Record<FilterKey, string> = {
+    month: 'Month',
+    property: 'Property',
+    category: 'Category',
+    quarter: 'Quarter',
+  };
 
   return (
     <div className="filters">
-      <Pill label="Month" value={current('month')} options={months} onChange={(v) => setParam('month', v)} />
-      <Pill label="Property" value={current('property')} options={properties} onChange={(v) => setParam('property', v)} />
-      <Pill label="Category" value={current('category')} options={categories} onChange={(v) => setParam('category', v)} />
+      {show.map((key) => (
+        <Pill
+          key={key}
+          label={labelFor[key]}
+          value={current(key)}
+          options={optionsFor[key]}
+          onChange={(v) => setParam(key, v)}
+        />
+      ))}
       {hasAny && (
-        <button type="button" className="filter-reset" onClick={() => router.push(pathname, { scroll: false })}>
+        <button
+          type="button"
+          className="filter-reset"
+          onClick={() => router.push(pathname, { scroll: false })}
+        >
           Reset
         </button>
       )}

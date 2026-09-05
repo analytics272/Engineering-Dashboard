@@ -165,15 +165,30 @@ const clean = (values: (string | null)[], cap = 60) =>
   [...new Set(values.filter((v): v is string => !!v && looksLikeLabel(v)))].sort().slice(0, cap);
 
 export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
-  const { rows, error } = await safeQuery<{
-    property: string | null;
-    category: string | null;
-    logged_month: string | null;
-    month_number: number | null;
-  }>(
-    `SELECT DISTINCT property, category, logged_month, month_number
-     FROM \`${TABLES.tickets}\``,
-  );
+  // All 4 are independent — fire them together instead of one round trip at a time.
+  const [ticketRows, q, bm, stamp] = await Promise.all([
+    safeQuery<{
+      property: string | null;
+      category: string | null;
+      logged_month: string | null;
+      month_number: number | null;
+    }>(
+      `SELECT DISTINCT property, category, logged_month, month_number
+       FROM \`${TABLES.tickets}\``,
+    ),
+    // Quarters (Budget breakdown) + month labels (Costs page trend) — raw_eng_looker_data / raw_eng_bills.
+    safeQuery<{ quarter: string | null }>(
+      `SELECT DISTINCT quarter FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL ORDER BY quarter`,
+    ),
+    safeQuery<{ month: string | null }>(
+      `SELECT DISTINCT month FROM \`${TABLES.bills}\` WHERE month IS NOT NULL`,
+    ),
+    safeQuery<{ ts: { value: string } | string | null }>(
+      `SELECT MAX(synced_at) AS ts FROM \`${TABLES.tickets}\``,
+    ),
+  ]);
+
+  const { rows, error } = ticketRows;
   if (error)
     return {
       properties: [],
@@ -197,22 +212,10 @@ export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
   }
   const months = [...monthOrder.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m).slice(0, 24);
 
-  // Quarters (Budget breakdown) + month labels (Costs page trend) — raw_eng_looker_data / raw_eng_bills.
-  const q = await safeQuery<{ quarter: string | null }>(
-    `SELECT DISTINCT quarter FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL ORDER BY quarter`,
-  );
   const quarters = clean(q.rows.map((r) => r.quarter), 12);
-
-  const bm = await safeQuery<{ month: string | null }>(
-    `SELECT DISTINCT month FROM \`${TABLES.bills}\` WHERE month IS NOT NULL`,
-  );
   const billMonths = clean(bm.rows.map((r) => r.month), 60);
-
   const years = availableYears([...months, ...billMonths]);
 
-  const stamp = await safeQuery<{ ts: { value: string } | string | null }>(
-    `SELECT MAX(synced_at) AS ts FROM \`${TABLES.tickets}\``,
-  );
   const rawTs = stamp.rows[0]?.ts;
   const lastUpdated =
     (typeof rawTs === 'object' && rawTs ? rawTs.value : (rawTs as string | null)) ?? null;

@@ -5,6 +5,7 @@ import { useCallback } from 'react';
 import type { FilterKey, FilterOptions } from '@/lib/queries';
 import { CompareToggle } from './CompareToggle';
 import { MultiSelectPill } from './MultiSelectPill';
+import { CustomMonthTab } from './CustomMonthTab';
 
 function Pill({
   label,
@@ -94,20 +95,7 @@ export function Filters({
               This Month
             </button>
           )}
-          <select
-            className={isCustom ? 'tab tab-select tab-active' : 'tab tab-select'}
-            value={isCustom ? monthVal : ''}
-            onChange={(e) => setParam('month', e.target.value)}
-          >
-            <option value="" disabled>
-              Custom Month…
-            </option>
-            {months.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
+          <CustomMonthTab months={months} value={monthVal} active={isCustom} onApply={(m) => setParam('month', m)} />
         </div>
       )}
 

@@ -38,20 +38,27 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   const currentMonths = series.find((s) => s.year === currentYear)?.months ?? [];
   const imCurrent = inClause('month', currentMonths, 'months');
 
-  // ---- per-series: all bills, by month + category (drives every KPI/trend below) --
-  const billsBySeries = await Promise.all(
-    series.map(async ({ year, months }) => {
-      const im = inClause('month', months, 'months');
-      const { rows, error } = await safeQuery<BillRow>(
-        `SELECT month, property, category, direct_category, SUM(bill_value) AS cost
-         FROM \`${TABLES.bills}\`
-         ${im.clause} ${propWhere.clause}
-         GROUP BY month, property, category, direct_category`,
-        { ...im.params, ...propWhere.params },
-      );
-      return { year, rows, error };
-    }),
-  );
+  // billsBySeries and lm (distinct looker months) don't depend on each other —
+  // fire them together instead of one BigQuery round trip at a time.
+  const [billsBySeries, lm] = await Promise.all([
+    // ---- per-series: all bills, by month + category (drives every KPI/trend below) --
+    Promise.all(
+      series.map(async ({ year, months }) => {
+        const im = inClause('month', months, 'months');
+        const { rows, error } = await safeQuery<BillRow>(
+          `SELECT month, property, category, direct_category, SUM(bill_value) AS cost
+           FROM \`${TABLES.bills}\`
+           ${im.clause} ${propWhere.clause}
+           GROUP BY month, property, category, direct_category`,
+          { ...im.params, ...propWhere.params },
+        );
+        return { year, rows, error };
+      }),
+    ),
+    safeQuery<{ month: string | null }>(
+      `SELECT DISTINCT month FROM \`${TABLES.looker}\` WHERE month IS NOT NULL`,
+    ),
+  ]);
 
   const anyError = billsBySeries.find((b) => b.error)?.error ?? null;
   const findSeries = <T extends { year: number | null }>(list: T[], y: number | null): T | undefined =>
@@ -118,30 +125,30 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
 
   // ---- Budget (raw_eng_looker_data) — Quarter-filtered ------------------------
   const quarterWhere = whereFor(filters, { quarter: 'quarter' }, 'AND');
-  const lm = await safeQuery<{ month: string | null }>(
-    `SELECT DISTINCT month FROM \`${TABLES.looker}\` WHERE month IS NOT NULL`,
-  );
   const lookerSeries = buildSeries(lm.rows.map((r) => r.month), compareOn, options.years, filters.month);
   const lookerCurMonths = lookerSeries.find((s) => s.year === currentYear)?.months ?? [];
   const lookerPriMonths = compareOn ? lookerSeries.find((s) => s.year === priorYear)?.months ?? [] : [];
 
-  const budgetFor = async (months: string[]) => {
+  const budgetFor = (months: string[]) => {
     const im = inClause('month', months, 'months');
     return safeQuery<{ amount: unknown }>(
       `SELECT SUM(amount) AS amount FROM \`${TABLES.looker}\` ${im.clause} ${quarterWhere.clause}`,
       { ...im.params, ...quarterWhere.params },
     );
   };
-  const [budgetCur, budgetPri] = await Promise.all([budgetFor(lookerCurMonths), budgetFor(lookerPriMonths)]);
+  const byQuarterIm = inClause('month', lookerCurMonths, 'months');
+
+  const [budgetCur, budgetPri, byQuarter] = await Promise.all([
+    budgetFor(lookerCurMonths),
+    budgetFor(lookerPriMonths),
+    safeQuery<{ quarter: string | null; amount: unknown }>(
+      `SELECT quarter, SUM(amount) AS amount FROM \`${TABLES.looker}\` ${byQuarterIm.clause}
+       AND quarter IS NOT NULL GROUP BY quarter ORDER BY quarter`,
+      byQuarterIm.params,
+    ),
+  ]);
   const curBudget = num(budgetCur.rows[0]?.amount);
   const priBudget = compareOn ? num(budgetPri.rows[0]?.amount) : null;
-
-  const byQuarterIm = inClause('month', lookerCurMonths, 'months');
-  const byQuarter = await safeQuery<{ quarter: string | null; amount: unknown }>(
-    `SELECT quarter, SUM(amount) AS amount FROM \`${TABLES.looker}\` ${byQuarterIm.clause}
-     AND quarter IS NOT NULL GROUP BY quarter ORDER BY quarter`,
-    byQuarterIm.params,
-  );
 
   const seriesColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
   const chartSeries = series.map((s, i) => ({

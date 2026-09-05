@@ -18,31 +18,34 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
   const propWhere = whereFor(filters, { property: 'property' });
   const propAnd = whereFor(filters, { property: 'property' }, 'AND');
 
-  const status = await safeQuery<{ amc_status: string | null; contract_count: unknown }>(
-    `SELECT amc_status, contract_count FROM \`${VIEWS.amcStatus}\``,
-  );
-  const costByType = await safeQuery<{ asset_type: string | null; total_yearly_cost: unknown }>(
-    `SELECT asset_type, total_yearly_cost FROM \`${VIEWS.amcCostByType}\` ORDER BY total_yearly_cost DESC`,
-  );
-  const avgCost = await safeQuery<{ property: string | null; avg_yearly_cost: unknown }>(
-    `SELECT property, avg_yearly_cost FROM \`${VIEWS.amcAvgCost}\` ${propWhere.clause} ORDER BY avg_yearly_cost DESC`,
-    propWhere.params,
-  );
-  const assetCategories = await safeQuery<{ property: string | null; category: string | null; asset_count: unknown; total_cost: unknown }>(
-    `SELECT property, category, asset_count, total_cost FROM \`${VIEWS.assetCategories}\` ${propWhere.clause} ORDER BY total_cost DESC`,
-    propWhere.params,
-  );
-  const contracts = await safeQuery<Record<string, unknown>>(
-    `SELECT type, asset_name, property, vendor_name, start_date, end_date, yearly_cost, per_month_cost, status, remarks
-     FROM \`${TABLES.amcs}\` ${propWhere.clause} ORDER BY end_date`,
-    propWhere.params,
-  );
-  const expiringSoon = await safeQuery<{ asset_name: string | null; property: string | null; end_date: unknown }>(
-    `SELECT asset_name, property, end_date FROM \`${TABLES.amcs}\`
-     WHERE end_date IS NOT NULL AND end_date >= CURRENT_DATE() ${propAnd.clause}
-     ORDER BY end_date LIMIT 8`,
-    propAnd.params,
-  );
+  // All 6 are independent — fire them together instead of one at a time.
+  const [status, costByType, avgCost, assetCategories, contracts, expiringSoon] = await Promise.all([
+    safeQuery<{ amc_status: string | null; contract_count: unknown }>(
+      `SELECT amc_status, contract_count FROM \`${VIEWS.amcStatus}\``,
+    ),
+    safeQuery<{ asset_type: string | null; total_yearly_cost: unknown }>(
+      `SELECT asset_type, total_yearly_cost FROM \`${VIEWS.amcCostByType}\` ORDER BY total_yearly_cost DESC`,
+    ),
+    safeQuery<{ property: string | null; avg_yearly_cost: unknown }>(
+      `SELECT property, avg_yearly_cost FROM \`${VIEWS.amcAvgCost}\` ${propWhere.clause} ORDER BY avg_yearly_cost DESC`,
+      propWhere.params,
+    ),
+    safeQuery<{ property: string | null; category: string | null; asset_count: unknown; total_cost: unknown }>(
+      `SELECT property, category, asset_count, total_cost FROM \`${VIEWS.assetCategories}\` ${propWhere.clause} ORDER BY total_cost DESC`,
+      propWhere.params,
+    ),
+    safeQuery<Record<string, unknown>>(
+      `SELECT type, asset_name, property, vendor_name, start_date, end_date, yearly_cost, per_month_cost, status, remarks
+       FROM \`${TABLES.amcs}\` ${propWhere.clause} ORDER BY end_date`,
+      propWhere.params,
+    ),
+    safeQuery<{ asset_name: string | null; property: string | null; end_date: unknown }>(
+      `SELECT asset_name, property, end_date FROM \`${TABLES.amcs}\`
+       WHERE end_date IS NOT NULL AND end_date >= CURRENT_DATE() ${propAnd.clause}
+       ORDER BY end_date LIMIT 8`,
+      propAnd.params,
+    ),
+  ]);
 
   const statusVal = (name: string) => num(status.rows.find((r) => r.amc_status === name)?.contract_count);
   const yearlyVals = avgCost.rows.map((r) => num(r.avg_yearly_cost)).filter((n) => n > 0);

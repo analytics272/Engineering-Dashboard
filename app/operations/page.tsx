@@ -45,84 +45,86 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
 
   const propWhere = whereFor(filters, { property: 'property' }, 'AND');
   const catWhere = whereFor(filters, { category: 'category' }, 'AND');
-
-  // ---- per-series: complaints volume + open/closed, by month -----------------
-  const complaintsBySeries = await Promise.all(
-    series.map(async ({ year, months }) => {
-      const im = inClause('logged_month', months, 'months');
-      const { rows, error } = await safeQuery<WeeklyRow>(
-        `SELECT logged_month,
-                SUM(total_complaints) AS total_complaints,
-                SUM(open_complaints)  AS open_complaints,
-                SUM(closed_complaints) AS closed_complaints
-         FROM \`${VIEWS.complaintsWeekly}\`
-         ${im.clause} ${propWhere.clause} ${catWhere.clause}
-         GROUP BY logged_month`,
-        { ...im.params, ...propWhere.params, ...catWhere.params },
-      );
-      return { year, rows, error };
-    }),
-  );
-
-  // ---- current series: property breakdown ------------------------------------
   const currentMonths = series.find((s) => s.year === currentYear)?.months ?? [];
   const imCurrent = inClause('logged_month', currentMonths, 'months');
-  const byProperty = await safeQuery<{ property: string | null; n: unknown }>(
-    `SELECT COALESCE(NULLIF(TRIM(property), ''), 'Unassigned') AS property, COUNT(*) AS n
-     FROM \`${TABLES.tickets}\`
-     ${imCurrent.clause} ${propWhere.clause} ${catWhere.clause}
-     GROUP BY 1 ORDER BY n DESC`,
-    { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
-  );
-
-  // ---- current series: escalation split ---------------------------------------
-  const escalation = await safeQuery<{ escalation_level: string | null; n: unknown }>(
-    `SELECT escalation_level, COUNT(*) AS n
-     FROM \`${TABLES.tickets}\`
-     ${imCurrent.clause} ${propWhere.clause} ${catWhere.clause}
-     GROUP BY 1`,
-    { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
-  );
-
-  // ---- per-series: ageing trend + overall avg (raw_eng_tickets, closed only) --
-  const ageingBySeries = await Promise.all(
-    series.map(async ({ year, months }) => {
-      const im = inClause('logged_month', months, 'months');
-      const trend = await safeQuery<AgeingRow>(
-        `SELECT logged_month, AVG(ageing_minutes) / 60.0 AS hours, COUNT(ageing_minutes) AS n
-         FROM \`${TABLES.tickets}\`
-         WHERE status = 'Closed' AND ageing_minutes IS NOT NULL
-         ${im.clause.replace(/^WHERE/, 'AND')} ${propWhere.clause} ${catWhere.clause}
-         GROUP BY logged_month`,
-        { ...im.params, ...propWhere.params, ...catWhere.params },
-      );
-      const overall = await safeQuery<{ hours: unknown }>(
-        `SELECT AVG(ageing_minutes) / 60.0 AS hours
-         FROM \`${TABLES.tickets}\`
-         WHERE status = 'Closed' AND ageing_minutes IS NOT NULL
-         ${im.clause.replace(/^WHERE/, 'AND')} ${propWhere.clause} ${catWhere.clause}`,
-        { ...im.params, ...propWhere.params, ...catWhere.params },
-      );
-      return { year, trend: trend.rows, error: trend.error || overall.error, overall: num(overall.rows[0]?.hours) };
-    }),
-  );
-
-  // ---- current series: worst categories by ageing ------------------------------
-  const worstCategories = await safeQuery<{ category: string | null; hours: unknown }>(
-    `SELECT category, AVG(ageing_minutes) / 60.0 AS hours
-     FROM \`${TABLES.tickets}\`
-     WHERE status = 'Closed' AND ageing_minutes IS NOT NULL
-     ${imCurrent.clause.replace(/^WHERE/, 'AND')} ${propWhere.clause}
-     GROUP BY category ORDER BY hours DESC LIMIT 8`,
-    { ...imCurrent.params, ...propWhere.params },
-  );
-
-  // ---- full MTTR by property × category (for the expand modal) ----------------
   const mttrWhere = whereFor(filters, { property: 'property', category: 'category' });
-  const mttrFull = await safeQuery<{ property: string | null; category: string | null; mttr_hours: unknown }>(
-    `SELECT property, category, mttr_hours FROM \`${VIEWS.mttr}\` ${mttrWhere.clause} ORDER BY mttr_hours DESC`,
-    mttrWhere.params,
-  );
+
+  // Every query below is independent of every other — fire them all together
+  // instead of one BigQuery round trip at a time (this was the main source of
+  // page load being slow: ~10 sequential round trips became 1 parallel wave).
+  const [complaintsBySeries, byProperty, escalation, ageingBySeries, worstCategories, mttrFull] =
+    await Promise.all([
+      // ---- per-series: complaints volume + open/closed, by month -------------
+      Promise.all(
+        series.map(async ({ year, months }) => {
+          const im = inClause('logged_month', months, 'months');
+          const { rows, error } = await safeQuery<WeeklyRow>(
+            `SELECT logged_month,
+                    SUM(total_complaints) AS total_complaints,
+                    SUM(open_complaints)  AS open_complaints,
+                    SUM(closed_complaints) AS closed_complaints
+             FROM \`${VIEWS.complaintsWeekly}\`
+             ${im.clause} ${propWhere.clause} ${catWhere.clause}
+             GROUP BY logged_month`,
+            { ...im.params, ...propWhere.params, ...catWhere.params },
+          );
+          return { year, rows, error };
+        }),
+      ),
+
+      // ---- current series: property breakdown --------------------------------
+      safeQuery<{ property: string | null; n: unknown }>(
+        `SELECT COALESCE(NULLIF(TRIM(property), ''), 'Unassigned') AS property, COUNT(*) AS n
+         FROM \`${TABLES.tickets}\`
+         ${imCurrent.clause} ${propWhere.clause} ${catWhere.clause}
+         GROUP BY 1 ORDER BY n DESC`,
+        { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
+      ),
+
+      // ---- current series: escalation split -----------------------------------
+      safeQuery<{ escalation_level: string | null; n: unknown }>(
+        `SELECT escalation_level, COUNT(*) AS n
+         FROM \`${TABLES.tickets}\`
+         ${imCurrent.clause} ${propWhere.clause} ${catWhere.clause}
+         GROUP BY 1`,
+        { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
+      ),
+
+      // ---- per-series: ageing trend (overall avg is derived from these rows,
+      // weighted by count, instead of a second query) --------------------------
+      Promise.all(
+        series.map(async ({ year, months }) => {
+          const im = inClause('logged_month', months, 'months');
+          const { rows, error } = await safeQuery<AgeingRow>(
+            `SELECT logged_month, AVG(ageing_minutes) / 60.0 AS hours, COUNT(ageing_minutes) AS n
+             FROM \`${TABLES.tickets}\`
+             WHERE status = 'Closed' AND ageing_minutes IS NOT NULL
+             ${im.clause.replace(/^WHERE/, 'AND')} ${propWhere.clause} ${catWhere.clause}
+             GROUP BY logged_month`,
+            { ...im.params, ...propWhere.params, ...catWhere.params },
+          );
+          const weightedSum = rows.reduce((s, r) => s + num(r.hours) * num(r.n), 0);
+          const weight = rows.reduce((s, r) => s + num(r.n), 0);
+          return { year, trend: rows, error, overall: weight ? weightedSum / weight : null };
+        }),
+      ),
+
+      // ---- current series: worst categories by ageing -------------------------
+      safeQuery<{ category: string | null; hours: unknown }>(
+        `SELECT category, AVG(ageing_minutes) / 60.0 AS hours
+         FROM \`${TABLES.tickets}\`
+         WHERE status = 'Closed' AND ageing_minutes IS NOT NULL
+         ${imCurrent.clause.replace(/^WHERE/, 'AND')} ${propWhere.clause}
+         GROUP BY category ORDER BY hours DESC LIMIT 8`,
+        { ...imCurrent.params, ...propWhere.params },
+      ),
+
+      // ---- full MTTR by property × category (for the expand modal) ------------
+      safeQuery<{ property: string | null; category: string | null; mttr_hours: unknown }>(
+        `SELECT property, category, mttr_hours FROM \`${VIEWS.mttr}\` ${mttrWhere.clause} ORDER BY mttr_hours DESC`,
+        mttrWhere.params,
+      ),
+    ]);
 
   // ---- aggregate helpers ------------------------------------------------------
   const sumField = (rows: WeeklyRow[], key: keyof WeeklyRow) => rows.reduce((s, r) => s + num(r[key]), 0);

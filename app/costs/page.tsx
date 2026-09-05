@@ -10,37 +10,37 @@ import {
   TABLES,
   getFilterOptions,
   parseFilters,
-  parseYears,
+  parseCompare,
   whereFor,
   inClause,
   type SearchParams,
 } from '@/lib/queries';
-import { planYearSeries, defaultYears } from '@/lib/period';
+import { buildSeries, buildTrendRows } from '@/lib/period';
 import { fmtCurrency, monthKey } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const seriesKey = (year: number | null) => (year != null ? String(year) : 'value');
 
 type BillRow = { month: string | null; property: string | null; category: string | null; direct_category: string | null; cost: unknown };
 
 export default async function CostsPage({ searchParams }: { searchParams: SearchParams }) {
   const options = await getFilterOptions();
   const filters = parseFilters(searchParams);
-  const selected = parseYears(searchParams);
-  const years = selected.length ? selected : defaultYears(options.years);
-  const compareOn = years.length >= 2;
-  const currentYear = years[years.length - 1];
-  const priorYear = years.length >= 2 ? years[years.length - 2] : null;
+  const compareOn = parseCompare(searchParams);
+
+  const series = buildSeries(options.billMonths, compareOn, options.years, filters.month);
+  const currentYear = series[series.length - 1].year;
+  const priorYear = series.length >= 2 ? series[series.length - 2].year : null;
+  const scopeLabel = currentYear != null ? String(currentYear) : 'All time';
 
   const propWhere = whereFor(filters, { property: 'property' }, 'AND');
-  const yearSeries = planYearSeries(options.billMonths, years, filters.month);
-  const currentMonths = yearSeries.find((y) => y.year === currentYear)?.months ?? [];
+  const currentMonths = series.find((s) => s.year === currentYear)?.months ?? [];
   const imCurrent = inClause('month', currentMonths, 'months');
 
-  // ---- per-year: all bills, by month + category (drives every KPI/trend below) --
-  const billsByYear = await Promise.all(
-    yearSeries.map(async ({ year, months }) => {
+  // ---- per-series: all bills, by month + category (drives every KPI/trend below) --
+  const billsBySeries = await Promise.all(
+    series.map(async ({ year, months }) => {
       const im = inClause('month', months, 'months');
       const { rows, error } = await safeQuery<BillRow>(
         `SELECT month, property, category, direct_category, SUM(bill_value) AS cost
@@ -53,11 +53,11 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
     }),
   );
 
-  const anyError = billsByYear.find((b) => b.error)?.error ?? null;
-  const findYear = <T extends { year: number }>(list: T[], y: number | null): T | undefined =>
+  const anyError = billsBySeries.find((b) => b.error)?.error ?? null;
+  const findSeries = <T extends { year: number | null }>(list: T[], y: number | null): T | undefined =>
     list.find((r) => r.year === y);
-  const curBills = findYear(billsByYear, currentYear)?.rows ?? [];
-  const priBills = priorYear != null ? findYear(billsByYear, priorYear)?.rows : undefined;
+  const curBills = findSeries(billsBySeries, currentYear)?.rows ?? [];
+  const priBills = compareOn ? findSeries(billsBySeries, priorYear)?.rows : undefined;
 
   const sumWhere = (rows: BillRow[], pred: (r: BillRow) => boolean) =>
     rows.filter(pred).reduce((s, r) => s + num(r.cost), 0);
@@ -68,24 +68,24 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   const curTotal = sumWhere(curBills, () => true);
   const priTotal = priBills ? sumWhere(priBills, () => true) : null;
 
-  // ---- trend: total bills cost, one line per selected year -------------------
-  const costTrend = MONTH_NAMES.map((name, i) => {
-    const row: Record<string, unknown> = { month: name };
-    for (const y of billsByYear) {
-      const monthLabel = y.rows.find((r) => r.month && monthKey(r.month) % 12 === i)?.month;
-      const total = monthLabel ? sumWhere(y.rows, (r) => r.month === monthLabel) : null;
-      row[String(y.year)] = total;
+  // ---- trend: total bills cost, one line per series --------------------------
+  const monthlyBillTotals = billsBySeries.map((s) => {
+    const totals = new Map<string, number>();
+    for (const r of s.rows) {
+      if (!r.month) continue;
+      totals.set(r.month, (totals.get(r.month) ?? 0) + num(r.cost));
     }
-    return row;
+    return { year: s.year, rows: [...totals.entries()].map(([month, total]) => ({ month, total })) };
   });
+  const costTrend = buildTrendRows(monthlyBillTotals, (r) => r.month, (r) => r.total, compareOn);
 
-  // ---- current year: electricity vs water split ------------------------------
+  // ---- current series: electricity vs water split -----------------------------
   const utilitySplit = [
     { name: 'Electricity', cost: sumWhere(curBills, (r) => r.direct_category === 'Electricity Charges') },
     { name: 'Water', cost: sumWhere(curBills, (r) => r.direct_category === 'Water') },
   ].filter((d) => d.cost > 0);
 
-  // ---- current year: top cost categories -------------------------------------
+  // ---- current series: top cost categories ------------------------------------
   const categoryTotals = new Map<string, number>();
   for (const r of curBills) {
     const key = r.category?.trim() || 'Uncategorised';
@@ -93,7 +93,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   }
   const topCategories = [...categoryTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
-  // ---- current year: property x category heat matrix -------------------------
+  // ---- current series: property x category heat matrix ------------------------
   const heatMonths = [...new Set(curBills.map((r) => r.month).filter(Boolean) as string[])].sort(
     (a, b) => monthKey(a) - monthKey(b),
   );
@@ -116,14 +116,14 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   const propertyTotals = new Map<string, number>();
   for (const r of heatRows) propertyTotals.set(r.label, (propertyTotals.get(r.label) ?? 0) + r.total);
 
-  // ---- Budget (raw_eng_looker_data) — Quarter-filtered, current-year scoped --
+  // ---- Budget (raw_eng_looker_data) — Quarter-filtered ------------------------
   const quarterWhere = whereFor(filters, { quarter: 'quarter' }, 'AND');
   const lm = await safeQuery<{ month: string | null }>(
     `SELECT DISTINCT month FROM \`${TABLES.looker}\` WHERE month IS NOT NULL`,
   );
-  const lookerYearSeries = planYearSeries(lm.rows.map((r) => r.month), years);
-  const lookerCurMonths = lookerYearSeries.find((y) => y.year === currentYear)?.months ?? [];
-  const lookerPriMonths = priorYear != null ? lookerYearSeries.find((y) => y.year === priorYear)?.months ?? [] : [];
+  const lookerSeries = buildSeries(lm.rows.map((r) => r.month), compareOn, options.years, filters.month);
+  const lookerCurMonths = lookerSeries.find((s) => s.year === currentYear)?.months ?? [];
+  const lookerPriMonths = compareOn ? lookerSeries.find((s) => s.year === priorYear)?.months ?? [] : [];
 
   const budgetFor = async (months: string[]) => {
     const im = inClause('month', months, 'months');
@@ -134,7 +134,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   };
   const [budgetCur, budgetPri] = await Promise.all([budgetFor(lookerCurMonths), budgetFor(lookerPriMonths)]);
   const curBudget = num(budgetCur.rows[0]?.amount);
-  const priBudget = priorYear != null ? num(budgetPri.rows[0]?.amount) : null;
+  const priBudget = compareOn ? num(budgetPri.rows[0]?.amount) : null;
 
   const byQuarterIm = inClause('month', lookerCurMonths, 'months');
   const byQuarter = await safeQuery<{ quarter: string | null; amount: unknown }>(
@@ -143,11 +143,16 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
     byQuarterIm.params,
   );
 
-  const yearColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
+  const seriesColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
+  const chartSeries = series.map((s, i) => ({
+    key: seriesKey(s.year),
+    name: s.year != null ? String(s.year) : 'Value',
+    color: seriesColor(i, series.length),
+  }));
   const scope = filters.quarter ? ` · ${filters.quarter}` : '';
 
   return (
-    <PageShell title="Costs & Budget" showYears filters={['month', 'property', 'quarter']}>
+    <PageShell title="Costs & Budget" showCompare filters={['month', 'property', 'quarter']}>
       <KpiCard
         title="Energy Cost (Elec + Water)"
         value={fmtCurrency(curEnergy)}
@@ -186,10 +191,10 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
         span={7}
         data={costTrend}
         xKey="month"
-        series={years.map((y, i) => ({ key: String(y), name: String(y), color: yearColor(i, years.length) }))}
+        series={chartSeries}
         unit="currency"
         error={anyError}
-        note={compareOn ? `Comparing the same calendar months across ${years.join(' vs ')}.` : 'Select 2+ years in "Compare" to overlay year-over-year.'}
+        note={compareOn ? `${currentYear} vs ${priorYear} — same calendar months compared.` : 'Turn on "Compare to Last Year" to overlay year-over-year.'}
       />
 
       <PieChartCard
@@ -199,7 +204,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
         nameKey="name"
         valueKey="cost"
         centerValue={fmtCurrency(curEnergy)}
-        centerLabel={String(currentYear)}
+        centerLabel={scopeLabel}
         error={anyError}
       />
 
@@ -209,7 +214,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
         rows={topCategories.map(([label, value]) => ({ label, value }))}
         valueFormatter={(v) => fmtCurrency(v)}
         error={anyError}
-        note={`raw_eng_bills · ${currentYear}`}
+        note={`raw_eng_bills · ${scopeLabel}`}
       />
 
       <PieChartCard
@@ -219,9 +224,9 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
         nameKey="quarter"
         valueKey="amount"
         centerValue={fmtCurrency(curBudget)}
-        centerLabel={String(currentYear)}
+        centerLabel={scopeLabel}
         error={byQuarter.error}
-        note="Ignores the Quarter filter by design — shows every quarter for the current comparison year."
+        note="Ignores the Quarter filter by design — shows every quarter for the current period."
       />
 
       <ExpandCard
@@ -237,7 +242,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
           bare
           rows={[...propertyTotals.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))}
           valueFormatter={(v) => fmtCurrency(v)}
-          note={`${currentYear} totals by property — expand for the property × category × month breakdown.`}
+          note={`${scopeLabel} totals by property — expand for the property × category × month breakdown.`}
         />
       </ExpandCard>
     </PageShell>

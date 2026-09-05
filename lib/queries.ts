@@ -56,7 +56,9 @@ export const VIEWS = {
 // Global filters — Spec §5, plus Quarter (Budget page)
 // ---------------------------------------------------------------------------
 export type FilterKey = 'month' | 'property' | 'category' | 'quarter';
-export type Filters = Partial<Record<FilterKey, string>>;
+// Property is multi-select (checkbox pill, comma-joined in the URL); everything
+// else here is still a single value.
+export type Filters = { month?: string; property?: string[]; category?: string; quarter?: string };
 export type SearchParams = Record<string, string | string[] | undefined>;
 
 export const DEFAULT_FILTERS: FilterKey[] = ['month', 'property', 'category'];
@@ -67,42 +69,52 @@ export function parseFilters(sp: SearchParams): Filters {
     const s = Array.isArray(v) ? v[0] : v;
     return s && s !== 'All' ? s : undefined;
   };
+  const multi = (k: string): string[] | undefined => {
+    const v = sp[k];
+    const s = Array.isArray(v) ? v[0] : v;
+    if (!s || s === 'All') return undefined;
+    const list = s.split(',').map((x) => x.trim()).filter(Boolean);
+    return list.length ? list : undefined;
+  };
   return {
     month: one('month'),
-    property: one('property'),
+    property: multi('property'),
     category: one('category'),
     quarter: one('quarter'),
   };
 }
 
-/** The "Compare Years" multi-select — `?years=2025,2026`. Independent of the single-value pills above. */
-export function parseYears(sp: SearchParams): number[] {
-  const v = sp.years;
-  const s = Array.isArray(v) ? v[0] : v;
-  if (!s) return [];
-  return s
-    .split(',')
-    .map((n) => parseInt(n.trim(), 10))
-    .filter((n) => Number.isFinite(n));
+/** The "Compare to Last Year" toggle — `?cmp=1`. Independent of the pills above. */
+export function parseCompare(sp: SearchParams): boolean {
+  const v = sp.cmp;
+  return (Array.isArray(v) ? v[0] : v) === '1';
 }
 
 type ColMap = Partial<Record<keyof Filters, string>>;
 
 /**
- * Build a WHERE fragment for whichever filters map to a real column in this view.
- * Returns `{ clause, params }` — clause is '' when nothing applies.
+ * Build a WHERE fragment for whichever filters map to a real column in this
+ * view. A multi-select value (currently just `property`) becomes
+ * `col IN UNNEST(@key_list)`; a plain string becomes `col = @key`. Returns
+ * `{ clause, params }` — clause is '' when nothing applies.
  */
 export function whereFor(
   filters: Filters,
   cols: ColMap,
   keyword: 'WHERE' | 'AND' = 'WHERE',
-): { clause: string; params: Record<string, string> } {
+): { clause: string; params: Record<string, string | string[]> } {
   const parts: string[] = [];
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   (Object.keys(cols) as (keyof Filters)[]).forEach((key) => {
     const col = cols[key];
     const val = filters[key];
-    if (col && val) {
+    if (!col || val == null) return;
+    if (Array.isArray(val)) {
+      if (val.length === 0) return;
+      const p = `${key}_list`;
+      parts.push(`${col} IN UNNEST(@${p})`);
+      params[p] = val;
+    } else if (val) {
       parts.push(`${col} = @${key}`);
       params[key] = val;
     }

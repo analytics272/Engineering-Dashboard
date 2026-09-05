@@ -11,17 +11,17 @@ import {
   TABLES,
   getFilterOptions,
   parseFilters,
-  parseYears,
+  parseCompare,
   whereFor,
   inClause,
   type SearchParams,
 } from '@/lib/queries';
-import { planYearSeries, defaultYears } from '@/lib/period';
+import { buildSeries, buildTrendRows } from '@/lib/period';
 import { fmtInt, fmtPct, fmtHours } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const seriesKey = (year: number | null) => (year != null ? String(year) : 'value');
 
 type WeeklyRow = {
   logged_month: string | null;
@@ -36,20 +36,19 @@ type AgeingRow = { logged_month: string | null; hours: unknown; n: unknown };
 export default async function OperationsPage({ searchParams }: { searchParams: SearchParams }) {
   const options = await getFilterOptions();
   const filters = parseFilters(searchParams);
-  const selected = parseYears(searchParams);
-  const years = selected.length ? selected : defaultYears(options.years);
-  const compareOn = years.length >= 2;
-  const currentYear = years[years.length - 1];
-  const priorYear = years.length >= 2 ? years[years.length - 2] : null;
+  const compareOn = parseCompare(searchParams);
+
+  const series = buildSeries(options.months, compareOn, options.years, filters.month);
+  const currentYear = series[series.length - 1].year;
+  const priorYear = series.length >= 2 ? series[series.length - 2].year : null;
+  const scopeLabel = currentYear != null ? String(currentYear) : 'All time';
 
   const propWhere = whereFor(filters, { property: 'property' }, 'AND');
   const catWhere = whereFor(filters, { category: 'category' }, 'AND');
 
-  const yearSeries = planYearSeries(options.months, years, filters.month);
-
-  // ---- per-year: complaints volume + open/closed, by month ------------------
-  const complaintsByYear = await Promise.all(
-    yearSeries.map(async ({ year, months }) => {
+  // ---- per-series: complaints volume + open/closed, by month -----------------
+  const complaintsBySeries = await Promise.all(
+    series.map(async ({ year, months }) => {
       const im = inClause('logged_month', months, 'months');
       const { rows, error } = await safeQuery<WeeklyRow>(
         `SELECT logged_month,
@@ -65,8 +64,8 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     }),
   );
 
-  // ---- per-year: property breakdown (current year only) ---------------------
-  const currentMonths = yearSeries.find((y) => y.year === currentYear)?.months ?? [];
+  // ---- current series: property breakdown ------------------------------------
+  const currentMonths = series.find((s) => s.year === currentYear)?.months ?? [];
   const imCurrent = inClause('logged_month', currentMonths, 'months');
   const byProperty = await safeQuery<{ property: string | null; n: unknown }>(
     `SELECT COALESCE(NULLIF(TRIM(property), ''), 'Unassigned') AS property, COUNT(*) AS n
@@ -76,7 +75,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
   );
 
-  // ---- per-year: escalation split (current year only) ------------------------
+  // ---- current series: escalation split ---------------------------------------
   const escalation = await safeQuery<{ escalation_level: string | null; n: unknown }>(
     `SELECT escalation_level, COUNT(*) AS n
      FROM \`${TABLES.tickets}\`
@@ -85,9 +84,9 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
   );
 
-  // ---- per-year: ageing trend + overall avg (raw_eng_tickets, closed only) --
-  const ageingByYear = await Promise.all(
-    yearSeries.map(async ({ year, months }) => {
+  // ---- per-series: ageing trend + overall avg (raw_eng_tickets, closed only) --
+  const ageingBySeries = await Promise.all(
+    series.map(async ({ year, months }) => {
       const im = inClause('logged_month', months, 'months');
       const trend = await safeQuery<AgeingRow>(
         `SELECT logged_month, AVG(ageing_minutes) / 60.0 AS hours, COUNT(ageing_minutes) AS n
@@ -108,7 +107,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     }),
   );
 
-  // ---- current year: worst categories by ageing ------------------------------
+  // ---- current series: worst categories by ageing ------------------------------
   const worstCategories = await safeQuery<{ category: string | null; hours: unknown }>(
     `SELECT category, AVG(ageing_minutes) / 60.0 AS hours
      FROM \`${TABLES.tickets}\`
@@ -118,7 +117,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     { ...imCurrent.params, ...propWhere.params },
   );
 
-  // ---- current year: full MTTR by property × category (for the expand modal) --
+  // ---- full MTTR by property × category (for the expand modal) ----------------
   const mttrWhere = whereFor(filters, { property: 'property', category: 'category' });
   const mttrFull = await safeQuery<{ property: string | null; category: string | null; mttr_hours: unknown }>(
     `SELECT property, category, mttr_hours FROM \`${VIEWS.mttr}\` ${mttrWhere.clause} ORDER BY mttr_hours DESC`,
@@ -127,11 +126,11 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
 
   // ---- aggregate helpers ------------------------------------------------------
   const sumField = (rows: WeeklyRow[], key: keyof WeeklyRow) => rows.reduce((s, r) => s + num(r[key]), 0);
-  const findYear = <T extends { year: number }>(list: T[], y: number | null): T | undefined =>
+  const findSeries = <T extends { year: number | null }>(list: T[], y: number | null): T | undefined =>
     list.find((r) => r.year === y);
 
-  const curComplaints = findYear(complaintsByYear, currentYear);
-  const priComplaints = findYear(complaintsByYear, priorYear);
+  const curComplaints = findSeries(complaintsBySeries, currentYear);
+  const priComplaints = compareOn ? findSeries(complaintsBySeries, priorYear) : undefined;
   const curTotal = curComplaints ? sumField(curComplaints.rows, 'total_complaints') : 0;
   const priTotal = priComplaints ? sumField(priComplaints.rows, 'total_complaints') : null;
   const curOpen = curComplaints ? sumField(curComplaints.rows, 'open_complaints') : 0;
@@ -141,40 +140,41 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
   const curClosurePct = curTotal ? (curClosed * 100) / curTotal : null;
   const priClosurePct = priTotal && priClosed != null ? (priClosed * 100) / priTotal : null;
 
-  const curAgeing = findYear(ageingByYear, currentYear);
-  const priAgeing = findYear(ageingByYear, priorYear);
+  const curAgeing = findSeries(ageingBySeries, currentYear);
+  const priAgeing = compareOn ? findSeries(ageingBySeries, priorYear) : undefined;
   const curAvgHours = curAgeing?.overall ?? null;
   const priAvgHours = priAgeing?.overall ?? null;
 
   const anyError =
-    complaintsByYear.find((c) => c.error)?.error ??
+    complaintsBySeries.find((c) => c.error)?.error ??
     byProperty.error ??
     escalation.error ??
-    ageingByYear.find((a) => a.error)?.error ??
+    ageingBySeries.find((a) => a.error)?.error ??
     null;
 
-  // ---- trend chart data: one row per calendar month, one column per year -----
-  const complaintsTrend = MONTH_NAMES.map((name, i) => {
-    const row: Record<string, unknown> = { month: name };
-    for (const y of complaintsByYear) {
-      const hit = y.rows.find((r) => r.logged_month && r.logged_month.toLowerCase().startsWith(name.toLowerCase()));
-      row[String(y.year)] = hit ? num(hit.total_complaints) : null;
-    }
-    return row;
-  });
-  const ageingTrend = MONTH_NAMES.map((name) => {
-    const row: Record<string, unknown> = { month: name };
-    for (const y of ageingByYear) {
-      const hit = y.trend.find((r) => r.logged_month && r.logged_month.toLowerCase().startsWith(name.toLowerCase()));
-      row[String(y.year)] = hit ? Number(num(hit.hours).toFixed(1)) : null;
-    }
-    return row;
-  });
+  // ---- trend chart data ---------------------------------------------------
+  const complaintsTrend = buildTrendRows(
+    complaintsBySeries,
+    (r) => r.logged_month,
+    (r) => num(r.total_complaints),
+    compareOn,
+  );
+  const ageingTrend = buildTrendRows(
+    ageingBySeries.map((s) => ({ year: s.year, rows: s.trend })),
+    (r) => r.logged_month,
+    (r) => Number(num(r.hours).toFixed(1)),
+    compareOn,
+  );
 
-  const yearColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
+  const seriesColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
+  const chartSeries = series.map((s, i) => ({
+    key: seriesKey(s.year),
+    name: s.year != null ? String(s.year) : 'Value',
+    color: seriesColor(i, series.length),
+  }));
 
   return (
-    <PageShell title="Operations" showYears filters={['month', 'property', 'category']}>
+    <PageShell title="Operations" showCompare filters={['month', 'property', 'category']}>
       <KpiCard
         title="Total Complaints"
         value={fmtInt(curTotal)}
@@ -212,8 +212,8 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
         span={7}
         data={complaintsTrend}
         xKey="month"
-        series={years.map((y, i) => ({ key: String(y), name: String(y), color: yearColor(i, years.length) }))}
-        note={compareOn ? `Comparing ${years.join(' vs ')} — select more/fewer years in "Compare".` : 'Select 2+ years in "Compare" to overlay year-over-year.'}
+        series={chartSeries}
+        note={compareOn ? `${currentYear} vs ${priorYear} — same calendar months compared.` : 'Turn on "Compare to Last Year" to overlay year-over-year.'}
         error={anyError}
       />
 
@@ -226,7 +226,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
         centerValue={fmtInt(escalation.rows.reduce((s, r) => s + num(r.n), 0))}
         centerLabel="tickets"
         error={escalation.error}
-        note={`L1/L2/L3 · ${currentYear}`}
+        note={`L1/L2/L3 · ${scopeLabel}`}
       />
 
       <TrendChartCard
@@ -235,7 +235,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
         variant="area"
         data={ageingTrend}
         xKey="month"
-        series={years.map((y, i) => ({ key: String(y), name: String(y), color: yearColor(i, years.length) }))}
+        series={chartSeries}
         unit="hours"
         error={anyError}
       />
@@ -246,7 +246,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
         rows={worstCategories.rows.map((r) => ({ label: r.category ?? '—', value: Number(num(r.hours).toFixed(1)) }))}
         valueFormatter={(v) => `${v}h`}
         error={worstCategories.error}
-        note={`Avg hours to close · ${currentYear}`}
+        note={`Avg hours to close · ${scopeLabel}`}
       />
 
       <ExpandCard

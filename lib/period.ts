@@ -72,8 +72,73 @@ export function planYearSeries(
   }));
 }
 
+export type Series = { year: number | null; months: string[] };
+
+/**
+ * Single entry point pages use to decide what to query, driven by the
+ * "Compare to Last Year" toggle:
+ *  - **off**: one flat series — every month the table has, or just the picked
+ *    Month if one is set. `year` is `null` (no year split, no delta shown).
+ *  - **on**: two series — current year vs prior year, restricted to the same
+ *    calendar months (see `planYearSeries`) — or just the picked Month across
+ *    both years. Exactly "this period vs the equivalent period last year".
+ */
+export function buildSeries(
+  allLabels: (string | null | undefined)[],
+  compareOn: boolean,
+  years: number[],
+  monthFilter?: string,
+): Series[] {
+  if (!compareOn) {
+    const months = monthFilter
+      ? allLabels.filter((l): l is string => !!l && l === monthFilter)
+      : allLabels.filter((l): l is string => !!l);
+    return [{ year: null, months: [...new Set(months)] }];
+  }
+  const currentYear = years[years.length - 1];
+  const priorYear = years.length >= 2 ? years[years.length - 2] : null;
+  const compareYears = priorYear != null ? [priorYear, currentYear] : [currentYear];
+  return planYearSeries(allLabels, compareYears, monthFilter);
+}
+
 /** Percent change, current vs prior. Null when there's nothing to compare against. */
 export function pctDelta(current: number, prior: number | null | undefined): number | null {
   if (prior == null || prior === 0) return null;
   return ((current - prior) / Math.abs(prior)) * 100;
+}
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Assembles chart-ready trend rows from one or more month-grouped series.
+ *  - **Compare on** (2 series): x-axis = calendar month names (Jan…Dec), one
+ *    column per series, so the two years overlay on the same 12 slots.
+ *  - **Compare off** (1 flat series): x-axis = the actual chronological month
+ *    labels, sorted — so multi-year history reads as one continuous line
+ *    instead of collapsing every year's "Jan" onto a single Jan slot.
+ */
+export function buildTrendRows<T>(
+  seriesList: { year: number | null; rows: T[] }[],
+  getMonth: (row: T) => string | null,
+  getValue: (row: T) => number,
+  compareOn: boolean,
+): Record<string, unknown>[] {
+  if (!compareOn) {
+    const rows = seriesList[0]?.rows ?? [];
+    return rows
+      .filter((r) => getMonth(r))
+      .sort((a, b) => monthKey(getMonth(a)) - monthKey(getMonth(b)))
+      .map((r) => ({ month: getMonth(r), value: getValue(r) }));
+  }
+  return MONTH_NAMES.map((name, i) => {
+    const row: Record<string, unknown> = { month: name };
+    for (const s of seriesList) {
+      const hit = s.rows.find((r) => {
+        const m = getMonth(r);
+        return m != null && monthKey(m) % 12 === i;
+      });
+      row[s.year != null ? String(s.year) : 'value'] = hit ? getValue(hit) : null;
+    }
+    return row;
+  });
 }

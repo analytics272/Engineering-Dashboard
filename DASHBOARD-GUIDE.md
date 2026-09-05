@@ -80,42 +80,52 @@ page, no lost context.
 
 ## Filters
 
-Pills in the top bar; each page only shows the ones it actually uses (Category
-only makes sense on Operations, since it's a ticket-category value; Quarter only
-on Costs & Budget). The active filter is always visible in the pill itself.
+Laid out to match the Skyla Sales dashboard's filter bar: a segmented tab strip
+for time range, a standalone "Compare to Last Year" toggle, then Property /
+Category / Quarter as pills, then Reset. Each page only shows what it actually
+uses. The active filter is always visible in the control itself.
 
-| Filter | Values from | Shown on |
-|---|---|---|
-| Month | `raw_eng_tickets.logged_month` (Operations) / `raw_eng_bills.month` (Costs) | Operations, Costs & Budget |
-| Property | `raw_eng_tickets.property` (KDP, HTC, JHS, BH4, LP, GB, Corporate Office) | Operations, Costs & Budget, Assets & Contracts |
-| Category | `raw_eng_tickets.category` (Plumbing, Electrical, …) | Operations only |
-| Quarter | `raw_eng_looker_data.quarter` (Q1–Q4) | Costs & Budget only |
+| Filter | Control | Values from | Shown on |
+|---|---|---|---|
+| Month | Segmented tabs — **All Time** / **This Month** / **Custom Month…** (a dropdown styled as the 3rd tab) | `raw_eng_tickets.logged_month` (Operations) / `raw_eng_bills.month` (Costs) | Operations, Costs & Budget |
+| Property | Multi-select pill (checkbox popover, e.g. "2 selected") | `raw_eng_tickets.property` (KDP, HTC, JHS, BH4, LP, GB, Corporate Office) | Operations, Costs & Budget, Assets & Contracts |
+| Category | Single-select pill | `raw_eng_tickets.category` (Plumbing, Electrical, …) | Operations only |
+| Quarter | Single-select pill | `raw_eng_looker_data.quarter` (Q1–Q4) | Costs & Budget only |
 
-**Every dropdown is populated by a live `SELECT DISTINCT` query at request time**
-(`lib/queries.ts getFilterOptions`) — a new month, property or category that
-shows up in the sheet appears in the filter the next time the page loads. There
-is no hardcoded list anywhere to update.
+**Every option list is populated by a live `SELECT DISTINCT` query at request
+time** (`lib/queries.ts getFilterOptions`) — a new month, property or category
+that shows up in the sheet appears in the filter the next time the page loads.
+There is no hardcoded list anywhere to update.
 
-## Comparison mode — "Compare Years"
+Property supports **multiple properties at once** (`?property=HTC,KDP` in the
+URL) — every query switches from `property = @property` to
+`property IN UNNEST(@property_list)` automatically (`lib/queries.ts whereFor`).
 
-A multi-select pill (default: the two most recent years present in the data —
-fully computed from the data, never hardcoded). Selecting 2+ years:
+## Comparison mode — "Compare to Last Year"
 
-- overlays each year as its own line on every trend chart (this year vs last
-  year, exactly like the Skyla Sales dashboard's FY-over-FY trend cards);
-- drives a bold **▲/▼ delta badge** on every KPI card, comparing the two most
-  recent of the selected years — increase is always green, decrease always red;
+A single toggle pill (dot + label), matching the Skyla Sales dashboard exactly
+— **not** a picker. Turning it on:
+
+- overlays **this year vs last year** as two lines on every trend chart;
+- drives a bold **▲/▼ delta badge** on every KPI card — increase always green,
+  decrease always red;
 - combines with every other active filter (Month/Property/Category/Quarter) —
-  e.g. pick Property = HTC and Compare 2025 vs 2026, and every number on the
-  page is HTC-only, year-over-year.
+  e.g. select Property = HTC and turn Compare on, and every number on the page
+  is HTC-only, year-over-year.
+
+"This year" is always the latest year present in the data (or the year of the
+Month you've picked); "last year" is the one before it — both fully computed
+from `getFilterOptions().years`, never hardcoded.
 
 **Equivalent-period logic:** if the current year only has data through August,
-every other selected year is restricted to Jan–Aug too — never a partial year
-compared against a full one. If a specific Month is picked (e.g. "Aug 26"),
-comparison narrows to that single calendar month across the selected years
-instead. A year with no data for the equivalent period shows the metric with no
-delta (rather than a fake 0%/∞% swing) — this happens today on the Budget KPI,
-since `raw_eng_looker_data` only has one fiscal year of rows so far.
+last year is restricted to Jan–Aug too — never a partial year compared against
+a full one. If a specific Month is picked (e.g. "Aug 26"), comparison narrows to
+that single calendar month in each year instead. If there's no data for the
+equivalent period, the metric shows with no delta (rather than a fake 0%/∞%
+swing) — this happens today on the Budget KPI, since `raw_eng_looker_data` only
+has one fiscal year of rows so far. When Compare is **off**, every chart and
+total spans the *entire* history (all months, all years) — not just "this
+year" — so "All Time" really does mean all time.
 
 Not shown on **Assets & Contracts**: AMC/asset data is point-in-time (active
 contracts *right now*, cost *right now*), not a monthly series, so a

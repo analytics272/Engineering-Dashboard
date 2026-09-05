@@ -91,6 +91,7 @@ export function TrendChartCard({
                     strokeWidth={2}
                     dot={false}
                     connectNulls
+                    isAnimationActive={false}
                   />
                 ) : (
                   <Line
@@ -103,6 +104,7 @@ export function TrendChartCard({
                     dot={{ r: 2.5 }}
                     activeDot={{ r: 4 }}
                     connectNulls
+                    isAnimationActive={false}
                   />
                 );
               })}

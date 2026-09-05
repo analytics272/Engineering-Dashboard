@@ -5,7 +5,7 @@ Next.js (App Router) and deployable to Vercel.
 
 3 pages, each grouping a business objective — **Operations** (complaints + ageing),
 **Costs & Budget** (energy + cost matrix + budget), **Assets & Contracts** (AMC + asset
-categories) — with a "Compare Years" year-over-year mode on the first two. See
+categories) — with a "Compare to Last Year" toggle on the first two. See
 [DASHBOARD-GUIDE.md](DASHBOARD-GUIDE.md) for what every widget means.
 
 The dashboard is **read-only**. It queries BigQuery views directly — no Supabase, no CSV

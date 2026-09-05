@@ -21,13 +21,13 @@ export async function PageShell({
   title,
   children,
   filters = DEFAULT_FILTERS,
-  showYears = false,
+  showCompare = false,
 }: {
   title: string;
   children: React.ReactNode;
   filters?: FilterKey[];
-  /** Show the multi-select "Compare Years" picker in the filter bar. */
-  showYears?: boolean;
+  /** Show the "Compare to Last Year" toggle in the filter bar. */
+  showCompare?: boolean;
 }) {
   const options = await getFilterOptions();
 
@@ -42,18 +42,19 @@ export async function PageShell({
           </div>
         </div>
         <Nav />
+        <div className="sidebar-footer">
+          <div className="sidebar-stamp" title="Data last synced from the sheet">
+            Last Updated
+            <span>{freshness(options.lastUpdated)}</span>
+          </div>
+        </div>
       </aside>
 
       <main className="content">
         <div className="topbar">
-          <div className="topbar-lead">
-            <h1>{title}</h1>
-            <span className="stamp" title="Data last synced from the sheet">
-              Updated {freshness(options.lastUpdated)}
-            </span>
-          </div>
+          <h1>{title}</h1>
           <Suspense fallback={<div className="muted">Loading filters…</div>}>
-            <Filters {...options} show={filters} showYears={showYears} />
+            <Filters {...options} show={filters} showCompare={showCompare} />
           </Suspense>
         </div>
 

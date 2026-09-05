@@ -51,6 +51,7 @@ export function PieChartCard({
                 paddingAngle={1.5}
                 stroke="#fff"
                 strokeWidth={2}
+                isAnimationActive={false}
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={PALETTE[i % PALETTE.length]} />

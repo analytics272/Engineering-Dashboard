@@ -3,18 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-// Flat nav — no sub-groups. `PPM · Incidents · Training` is intentionally
-// omitted: its Appendix-A tables aren't synced yet, so the page has no data.
-// Add { href: '/operations', label: 'PPM · Incidents · Training' } back once
-// raw_eng_ppm / _trainings / _incidents exist in BigQuery.
+// 3 pages, grouped by business objective — Complaints+Ageing, the 3 cost
+// pages, and AMC+Assets each collapsed into one. See DASHBOARD-GUIDE.md.
 const PAGES = [
-  { href: '/complaints', label: 'Complaints' },
-  { href: '/ageing', label: 'Ageing' },
-  { href: '/energy-costing', label: 'Energy Costing' },
-  { href: '/costing', label: 'Costing' },
-  { href: '/amc', label: 'AMC' },
-  { href: '/budget', label: 'Budget' },
-  { href: '/assets', label: 'Asset Categories' },
+  { href: '/operations', label: 'Operations' },
+  { href: '/costs', label: 'Costs & Budget' },
+  { href: '/assets', label: 'Assets & Contracts' },
 ];
 
 export function Nav() {

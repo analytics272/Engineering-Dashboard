@@ -21,10 +21,13 @@ export async function PageShell({
   title,
   children,
   filters = DEFAULT_FILTERS,
+  showYears = false,
 }: {
   title: string;
   children: React.ReactNode;
   filters?: FilterKey[];
+  /** Show the multi-select "Compare Years" picker in the filter bar. */
+  showYears?: boolean;
 }) {
   const options = await getFilterOptions();
 
@@ -50,7 +53,7 @@ export async function PageShell({
             </span>
           </div>
           <Suspense fallback={<div className="muted">Loading filters…</div>}>
-            <Filters {...options} show={filters} />
+            <Filters {...options} show={filters} showYears={showYears} />
           </Suspense>
         </div>
 

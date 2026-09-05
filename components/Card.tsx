@@ -6,18 +6,23 @@ export function Card({
   note,
   error,
   children,
+  bare = false,
 }: {
   title?: string;
   span?: Span;
   note?: string;
   error?: string | null;
   children?: React.ReactNode;
+  /** Skip the card chrome (border/padding/shadow) — for use inside another card or a modal. */
+  bare?: boolean;
 }) {
-  return (
-    <section className={`card span-${span}`}>
+  const inner = (
+    <>
       {title && <h3>{title}</h3>}
       {error ? <div className="inline-error">{error}</div> : children}
       {note && !error && <div className="card-note">{note}</div>}
-    </section>
+    </>
   );
+  if (bare) return inner;
+  return <section className={`card span-${span}`}>{inner}</section>;
 }

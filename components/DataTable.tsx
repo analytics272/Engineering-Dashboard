@@ -18,6 +18,7 @@ export function DataTable<Row extends Record<string, unknown>>({
   note,
   error,
   emptyText = 'No rows for the current filters.',
+  bare = false,
 }: {
   title: string;
   columns: Column<Row>[];
@@ -26,9 +27,10 @@ export function DataTable<Row extends Record<string, unknown>>({
   note?: string;
   error?: string | null;
   emptyText?: string;
+  bare?: boolean;
 }) {
   return (
-    <Card title={title} span={span} note={note} error={error}>
+    <Card title={title} span={span} note={note} error={error} bare={bare}>
       {rows.length === 0 ? (
         <div className="muted">{emptyText}</div>
       ) : (

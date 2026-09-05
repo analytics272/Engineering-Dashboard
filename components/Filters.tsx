@@ -3,6 +3,7 @@
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
 import type { FilterKey, FilterOptions } from '@/lib/queries';
+import { YearPicker } from './YearPicker';
 
 function Pill({
   label,
@@ -33,8 +34,10 @@ export function Filters({
   categories,
   months,
   quarters,
+  years,
   show = ['month', 'property', 'category'],
-}: FilterOptions & { show?: FilterKey[] }) {
+  showYears = false,
+}: FilterOptions & { show?: FilterKey[]; showYears?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -51,7 +54,7 @@ export function Filters({
   );
 
   const current = (key: string) => sp.get(key) ?? 'All';
-  const hasAny = show.some((k) => sp.get(k));
+  const hasAny = show.some((k) => sp.get(k)) || (showYears && !!sp.get('years'));
 
   const optionsFor: Record<FilterKey, string[]> = {
     month: months,
@@ -68,6 +71,7 @@ export function Filters({
 
   return (
     <div className="filters">
+      {showYears && <YearPicker years={years} />}
       {show.map((key) => (
         <Pill
           key={key}

@@ -5,13 +5,16 @@ import { PALETTE, tooltipStyle } from './palette';
 
 type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
 
+/** Donut chart with an optional centre total — the Google-Analytics-style split. */
 export function PieChartCard({
   title,
   data,
   nameKey,
   valueKey,
   span = 4,
-  height = 280,
+  height = 260,
+  centerLabel,
+  centerValue,
   note,
   error,
 }: {
@@ -21,6 +24,8 @@ export function PieChartCard({
   valueKey: string;
   span?: Span;
   height?: number;
+  centerLabel?: string;
+  centerValue?: string;
   note?: string;
   error?: string | null;
 }) {
@@ -32,7 +37,7 @@ export function PieChartCard({
       ) : data.length === 0 ? (
         <div className="muted">No data for the current filters.</div>
       ) : (
-        <div className="chart-box" style={{ height }}>
+        <div className="chart-box donut-box" style={{ height }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -41,17 +46,26 @@ export function PieChartCard({
                 nameKey={nameKey}
                 cx="50%"
                 cy="50%"
-                outerRadius="78%"
-                stroke="#161b22"
+                innerRadius="58%"
+                outerRadius="82%"
+                paddingAngle={1.5}
+                stroke="#fff"
+                strokeWidth={2}
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
                 ))}
               </Pie>
               <Tooltip contentStyle={tooltipStyle} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11.5 }} />
             </PieChart>
           </ResponsiveContainer>
+          {centerValue && (
+            <div className="donut-center">
+              <div className="donut-center-value">{centerValue}</div>
+              {centerLabel && <div className="donut-center-label">{centerLabel}</div>}
+            </div>
+          )}
         </div>
       )}
       {note && !error && <div className="card-note">{note}</div>}

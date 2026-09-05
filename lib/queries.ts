@@ -1,5 +1,7 @@
 import 'server-only';
+import { cache } from 'react';
 import { DATASET, safeQuery } from './bigquery';
+import { availableYears } from './period';
 
 // ---------------------------------------------------------------------------
 // Fully-qualified object names. Centralised so a rename is a one-line fix.
@@ -73,6 +75,17 @@ export function parseFilters(sp: SearchParams): Filters {
   };
 }
 
+/** The "Compare Years" multi-select — `?years=2025,2026`. Independent of the single-value pills above. */
+export function parseYears(sp: SearchParams): number[] {
+  const v = sp.years;
+  const s = Array.isArray(v) ? v[0] : v;
+  if (!s) return [];
+  return s
+    .split(',')
+    .map((n) => parseInt(n.trim(), 10))
+    .filter((n) => Number.isFinite(n));
+}
+
 type ColMap = Partial<Record<keyof Filters, string>>;
 
 /**
@@ -97,6 +110,26 @@ export function whereFor(
   return { clause: parts.length ? `${keyword} ${parts.join(' AND ')}` : '', params };
 }
 
+/**
+ * `col IN UNNEST(@paramName)` fragment for a list of exact values (e.g. the
+ * month labels making up one year-series). Empty list -> a clause that matches
+ * nothing (`FALSE`) with NO param — the BigQuery client can't infer a type for
+ * an empty array parameter and throws "Parameter types must be provided for
+ * empty arrays", so an unreferenced param must not be passed at all.
+ */
+export function inClause(
+  col: string,
+  values: string[],
+  paramName: string,
+  keyword: 'WHERE' | 'AND' = 'WHERE',
+): { clause: string; params: Record<string, string[]> } {
+  if (values.length === 0) return { clause: `${keyword} FALSE`, params: {} };
+  return {
+    clause: `${keyword} ${col} IN UNNEST(@${paramName})`,
+    params: { [paramName]: values },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Filter dropdown options — distinct values from the tickets table.
 // ---------------------------------------------------------------------------
@@ -105,6 +138,10 @@ export type FilterOptions = {
   categories: string[];
   months: string[];
   quarters: string[];
+  /** every distinct month label from bills — used by the Costs page's Years comparison */
+  billMonths: string[];
+  /** every calendar year seen across tickets + bills — feeds the Compare Years picker, fully data-driven */
+  years: number[];
   lastUpdated: string | null;
   error: string | null;
 };
@@ -115,7 +152,7 @@ const looksLikeLabel = (s: string) => /[A-Za-z]/.test(s) && s.length <= 40 && !/
 const clean = (values: (string | null)[], cap = 60) =>
   [...new Set(values.filter((v): v is string => !!v && looksLikeLabel(v)))].sort().slice(0, cap);
 
-export async function getFilterOptions(): Promise<FilterOptions> {
+export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
   const { rows, error } = await safeQuery<{
     property: string | null;
     category: string | null;
@@ -126,7 +163,16 @@ export async function getFilterOptions(): Promise<FilterOptions> {
      FROM \`${TABLES.tickets}\``,
   );
   if (error)
-    return { properties: [], categories: [], months: [], quarters: [], lastUpdated: null, error };
+    return {
+      properties: [],
+      categories: [],
+      months: [],
+      quarters: [],
+      billMonths: [],
+      years: [],
+      lastUpdated: null,
+      error,
+    };
 
   const properties = clean(rows.map((r) => r.property));
   const categories = clean(rows.map((r) => r.category));
@@ -139,11 +185,18 @@ export async function getFilterOptions(): Promise<FilterOptions> {
   }
   const months = [...monthOrder.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m).slice(0, 24);
 
-  // Quarters for the Budget page (raw_eng_looker_data).
+  // Quarters (Budget breakdown) + month labels (Costs page trend) — raw_eng_looker_data / raw_eng_bills.
   const q = await safeQuery<{ quarter: string | null }>(
     `SELECT DISTINCT quarter FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL ORDER BY quarter`,
   );
   const quarters = clean(q.rows.map((r) => r.quarter), 12);
+
+  const bm = await safeQuery<{ month: string | null }>(
+    `SELECT DISTINCT month FROM \`${TABLES.bills}\` WHERE month IS NOT NULL`,
+  );
+  const billMonths = clean(bm.rows.map((r) => r.month), 60);
+
+  const years = availableYears([...months, ...billMonths]);
 
   const stamp = await safeQuery<{ ts: { value: string } | string | null }>(
     `SELECT MAX(synced_at) AS ts FROM \`${TABLES.tickets}\``,
@@ -152,5 +205,5 @@ export async function getFilterOptions(): Promise<FilterOptions> {
   const lastUpdated =
     (typeof rawTs === 'object' && rawTs ? rawTs.value : (rawTs as string | null)) ?? null;
 
-  return { properties, categories, months, quarters, lastUpdated, error: null };
-}
+  return { properties, categories, months, quarters, billMonths, years, lastUpdated, error: null };
+});

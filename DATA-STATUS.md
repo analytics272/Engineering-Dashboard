@@ -4,6 +4,19 @@ Ran against `skyla-analytics.Skyla_Engineering_Automation` with the read-only
 service account. Dataset + table names all match the spec (§3). All 11 core
 views created and queryable. **All pages render real data — safe to deploy.**
 
+## 🔴 2026-09-22 — sync has stopped, not just "daily"
+
+`MAX(synced_at)`: `raw_eng_tickets` = 2026-09-04 (18 days stale), `raw_eng_bills`
+/ `raw_eng_amcs` / `raw_eng_looker_data` = 2026-08-27 (26 days stale). The daily
+`syncDroplist` trigger is fine (synced today) — it's specifically the 2-hourly
+`syncAll` trigger (tickets/bills/AMCs/budget) that has gone quiet. This is an
+Apps Script issue, not a dashboard one — the dashboard now surfaces it directly
+(a warning banner + a tinted "Last Updated" stamp appear on every page once
+data is >6h old, see `components/PageShell.tsx`). To fix: open the Apps Script
+project for the sheet → **Triggers** → confirm `syncAll`'s trigger still exists
+and hasn't been auto-disabled by Google after repeated failures → check
+**Executions** for the actual error (commonly expired/revoked authorization).
+
 ## History: a transient bad sync (now resolved)
 
 The 07:08 UTC sync of `raw_eng_tickets` was corrupt (every column held the row

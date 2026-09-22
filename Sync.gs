@@ -43,8 +43,18 @@ function syncDroplist() {
   Logger.log('syncDroplist: replaced ' + rows.length + ' rows in ' + cfg.tableName);
 }
 
-/** One-time / on-demand: wipes and reloads every configured fact table from row 1. */
+/**
+ * Wipes and reloads every configured fact table from row 1. Runs on-demand
+ * (manual "Run" in the editor) and nightly via the fullResyncNow trigger
+ * installed by installNightlyFullResyncTrigger() in Triggers.gs — the nightly
+ * run exists specifically to pick up edits to rows syncAll's incremental
+ * cursor has already passed (e.g. a ticket's status changed after it was
+ * first synced), which the 2-hourly incremental sync can never see.
+ */
 function fullResyncNow() {
+  const startedAt = new Date();
+  Logger.log('fullResyncNow: nightly full resync starting at ' + startedAt.toISOString());
+
   const ss = SpreadsheetApp.openById(ENG_SPREADSHEET_ID);
   ENG_SHEET_CONFIG.forEach(function (cfg) {
     PropertiesService.getScriptProperties().deleteProperty(cursorKey_(cfg.tableName));
@@ -52,6 +62,10 @@ function fullResyncNow() {
     syncSheetIncremental_(ss, cfg);
   });
   syncDroplist();
+
+  const finishedAt = new Date();
+  const seconds = ((finishedAt - startedAt) / 1000).toFixed(1);
+  Logger.log('fullResyncNow: nightly full resync finished at ' + finishedAt.toISOString() + ' (' + seconds + 's)');
 }
 
 // ------------------------------------------------------------------

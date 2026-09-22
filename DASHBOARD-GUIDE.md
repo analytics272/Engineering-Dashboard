@@ -59,6 +59,19 @@ BigQuery table/view names and everything downstream are unchanged.
    section break). These have no ticket number and were previously syncing in
    as bogus half-blank ticket rows. `syncSheetIncremental_()` now skips any row
    without a numeric `No.`.
+4. **Edits to already-synced rows were invisible (fixed 2026-09-22).**
+   `syncAll`'s incremental sync (`syncSheetIncremental_`) only ever scans rows
+   *appended after* its stored cursor — it never re-reads a row it has already
+   synced. So editing an existing row in the sheet (e.g. flipping a ticket's
+   `status` from `Open` to `Closed` after it was first synced) never reached
+   BigQuery, no matter how often `syncAll` ran (this is why "Open Complaints"
+   could keep showing tickets that were actually long since closed). Fixed by
+   adding a **nightly `fullResyncNow` trigger, 2:00–3:00 AM Asia/Kolkata**
+   (`installNightlyFullResyncTrigger()` in `Triggers.gs`) that wipes and
+   reloads every table from row 1 once a day, alongside the unchanged
+   2-hourly incremental `syncAll`. Idempotent — re-running `installEngTriggers()`
+   never creates duplicate nightly triggers. `fullResyncNow()` now logs its
+   start/finish time+duration in the Executions log.
 
 ---
 

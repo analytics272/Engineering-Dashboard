@@ -4,18 +4,30 @@ Ran against `skyla-analytics.Skyla_Engineering_Automation` with the read-only
 service account. Dataset + table names all match the spec (§3). All 11 core
 views created and queryable. **All pages render real data — safe to deploy.**
 
-## 🔴 2026-09-22 — sync has stopped, not just "daily"
+## 🟡 2026-09-22 — stale `synced_at` explained (corrected)
 
-`MAX(synced_at)`: `raw_eng_tickets` = 2026-09-04 (18 days stale), `raw_eng_bills`
-/ `raw_eng_amcs` / `raw_eng_looker_data` = 2026-08-27 (26 days stale). The daily
-`syncDroplist` trigger is fine (synced today) — it's specifically the 2-hourly
-`syncAll` trigger (tickets/bills/AMCs/budget) that has gone quiet. This is an
-Apps Script issue, not a dashboard one — the dashboard now surfaces it directly
-(a warning banner + a tinted "Last Updated" stamp appear on every page once
-data is >6h old, see `components/PageShell.tsx`). To fix: open the Apps Script
-project for the sheet → **Triggers** → confirm `syncAll`'s trigger still exists
-and hasn't been auto-disabled by Google after repeated failures → check
-**Executions** for the actual error (commonly expired/revoked authorization).
+`MAX(synced_at)`: `raw_eng_tickets` = 2026-09-04 (18 days), `raw_eng_bills` /
+`raw_eng_amcs` / `raw_eng_looker_data` = 2026-08-27 (26 days). **First read of
+this was wrong** — I initially assumed the `syncAll` trigger had stopped
+running. The Apps Script Executions log proved otherwise: `syncAll` has been
+completing successfully every 2 hours the whole time, 0% error rate, right up
+to today.
+
+The real explanation: `syncSheetIncremental_()` (`Sync.gs`) only scans rows
+*appended after* its stored cursor — a row it already synced is never
+re-read. So `synced_at` staying frozen just means no *new* rows have landed in
+the sheet since then, **and** it means any *edit* to an already-synced row
+(e.g. a ticket's `status` flipped from `Open` to `Closed`) never reaches
+BigQuery at all, no matter how often `syncAll` runs — which is what actually
+caused "Open Complaints" to show tickets that had likely already been closed.
+
+**Fixed 2026-09-22:** added a nightly `fullResyncNow` trigger (2:00–3:00 AM
+Asia/Kolkata) that wipes and reloads every table from row 1 once a day, so
+edits like this surface within 24h instead of never. See
+[DASHBOARD-GUIDE.md](DASHBOARD-GUIDE.md) point 4 and `Triggers.gs`
+`installNightlyFullResyncTrigger()`. The dashboard's own stale-data warning
+(banner + tinted "Last Updated" stamp past 6h, `components/PageShell.tsx`)
+stays as a general early-warning signal regardless of root cause.
 
 ## History: a transient bad sync (now resolved)
 

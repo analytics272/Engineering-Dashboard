@@ -2,6 +2,15 @@ import { Card } from './Card';
 
 type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
 
+export type RankingRow = {
+  label: string;
+  value: number;
+  /** Overrides valueFormatter's output for this row (e.g. "in 12 days" instead of a formatted number). */
+  display?: string;
+  /** Overrides the bar colour for this row (e.g. urgency coding: red/amber/green). */
+  barColor?: string;
+};
+
 export function RankingList({
   title,
   rows,
@@ -12,7 +21,7 @@ export function RankingList({
   bare = false,
 }: {
   title: string;
-  rows: { label: string; value: number }[];
+  rows: RankingRow[];
   span?: Span;
   note?: string;
   error?: string | null;
@@ -36,10 +45,13 @@ export function RankingList({
               <span className="ranking-bar-track">
                 <span
                   className="ranking-bar"
-                  style={{ width: `${Math.max(4, (Math.abs(r.value) / max) * 100)}%` }}
+                  style={{
+                    width: `${Math.max(4, (Math.abs(r.value) / max) * 100)}%`,
+                    ...(r.barColor ? { background: r.barColor } : {}),
+                  }}
                 />
               </span>
-              <span className="ranking-value">{valueFormatter(r.value)}</span>
+              <span className="ranking-value">{r.display ?? valueFormatter(r.value)}</span>
             </div>
           ))}
         </div>

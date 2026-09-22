@@ -1,6 +1,5 @@
 import { PageShell } from '@/components/PageShell';
 import { KpiCard } from '@/components/KpiCard';
-import { Card } from '@/components/Card';
 import { PieChartCard } from '@/components/charts/PieChartCard';
 import { RankingList } from '@/components/RankingList';
 import { ExpandCard } from '@/components/ExpandCard';
@@ -18,8 +17,8 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
   const propWhere = whereFor(filters, { property: 'property' });
   const propAnd = whereFor(filters, { property: 'property' }, 'AND');
 
-  // All 6 are independent — fire them together instead of one at a time.
-  const [status, costByType, avgCost, assetCategories, contracts, expiringSoon] = await Promise.all([
+  // All 7 are independent — fire them together instead of one at a time.
+  const [status, costByType, avgCost, assetCategories, contracts, expiringSoon, expiryBuckets] = await Promise.all([
     safeQuery<{ amc_status: string | null; contract_count: unknown }>(
       `SELECT amc_status, contract_count FROM \`${VIEWS.amcStatus}\``,
     ),
@@ -39,13 +38,43 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
        FROM \`${TABLES.amcs}\` ${propWhere.clause} ORDER BY end_date`,
       propWhere.params,
     ),
-    safeQuery<{ asset_name: string | null; property: string | null; end_date: unknown }>(
-      `SELECT asset_name, property, end_date FROM \`${TABLES.amcs}\`
+    safeQuery<{ asset_name: string | null; property: string | null; end_date: unknown; days_left: unknown }>(
+      `SELECT asset_name, property, end_date, DATE_DIFF(end_date, CURRENT_DATE(), DAY) AS days_left
+       FROM \`${TABLES.amcs}\`
        WHERE end_date IS NOT NULL AND end_date >= CURRENT_DATE() ${propAnd.clause}
        ORDER BY end_date LIMIT 8`,
       propAnd.params,
     ),
+    safeQuery<{ bucket: string; n: unknown }>(
+      `SELECT
+         CASE
+           WHEN end_date IS NULL THEN 'Unknown'
+           WHEN end_date < CURRENT_DATE() THEN 'Expired'
+           WHEN DATE_DIFF(end_date, CURRENT_DATE(), DAY) <= 30 THEN '≤ 30 days'
+           WHEN DATE_DIFF(end_date, CURRENT_DATE(), DAY) <= 90 THEN '31–90 days'
+           ELSE '90+ days'
+         END AS bucket,
+         COUNT(*) AS n
+       FROM \`${TABLES.amcs}\`
+       ${propAnd.clause.replace(/^AND/, 'WHERE')}
+       GROUP BY bucket`,
+      propAnd.params,
+    ),
   ]);
+
+  const BUCKET_ORDER = ['Expired', '≤ 30 days', '31–90 days', '90+ days', 'Unknown'];
+  const BUCKET_COLOR: Record<string, string> = {
+    Expired: '#cf4b3f',
+    '≤ 30 days': '#cf4b3f',
+    '31–90 days': '#c9821f',
+    '90+ days': '#0f5b52',
+    Unknown: '#83938f',
+  };
+  const bucketRows = BUCKET_ORDER.map((bucket) => ({
+    label: bucket,
+    value: num(expiryBuckets.rows.find((r) => r.bucket === bucket)?.n),
+    barColor: BUCKET_COLOR[bucket],
+  })).filter((r) => r.value > 0);
 
   const statusVal = (name: string) => num(status.rows.find((r) => r.amc_status === name)?.contract_count);
   const yearlyVals = avgCost.rows.map((r) => num(r.avg_yearly_cost)).filter((n) => n > 0);
@@ -68,7 +97,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
         sub="Mean across properties"
         span={3}
         error={avgCost.error}
-        breakdown={avgCost.rows.map((r) => ({ label: r.property ?? '—', value: fmtCurrency(num(r.avg_yearly_cost)) }))}
+        breakdown={avgCost.rows.map((r) => ({ label: r.property ?? '—', value: num(r.avg_yearly_cost), display: fmtCurrency(num(r.avg_yearly_cost)) }))}
       />
 
       <PieChartCard
@@ -91,21 +120,22 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
         note="AMC-linked assets only (Elevator, AC, Generator, Internet…) — not a full inventory. No internal owner field exists, only vendor_name."
       />
 
-      <Card
+      <RankingList
         title="Expiring Soonest"
         span={5}
         error={expiringSoon.error}
-        note={expiringSoon.rows.length ? undefined : 'Nothing due, or end_date is missing on these rows.'}
-      >
-        <div className="mini-list">
-          {expiringSoon.rows.map((r, i) => (
-            <div className="mini-list-row" key={i}>
-              <span>{text(r.asset_name)} · {text(r.property)}</span>
-              <span className="mini-list-value">{text(r.end_date)}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
+        rows={expiringSoon.rows.map((r) => {
+          const days = num(r.days_left);
+          const urgency = Math.max(4, 180 - Math.min(days, 180));
+          return {
+            label: `${text(r.asset_name)} · ${text(r.property)}`,
+            value: urgency,
+            display: days <= 0 ? 'today' : `in ${days}d`,
+            barColor: days <= 30 ? '#cf4b3f' : days <= 90 ? '#c9821f' : '#0f5b52',
+          };
+        })}
+        note={expiringSoon.rows.length ? 'Bar length = urgency (shorter time left = fuller bar); red ≤30d, amber ≤90d.' : 'Nothing due, or end_date is missing on these rows.'}
+      />
 
       <ExpandCard
         title="Asset Listing (by Property × Category)"
@@ -154,20 +184,10 @@ export default async function AssetsPage({ searchParams }: { searchParams: Searc
           />
         }
       >
-        <div className="muted" style={{ marginBottom: 6 }}>
-          {contracts.rows.length} contracts on file. Click ⤢ for the full table.
+        <div className="muted" style={{ marginBottom: 8 }}>
+          {contracts.rows.length} contracts on file, by time to expiry. Click ⤢ for the full table.
         </div>
-        <div className="mini-list">
-          {contracts.rows
-            .filter((r) => r.end_date != null)
-            .slice(0, 4)
-            .map((r, i) => (
-              <div className="mini-list-row" key={i}>
-                <span>{text(r.asset_name)} · {text(r.property)}</span>
-                <span className="mini-list-value">{text(r.end_date)}</span>
-              </div>
-            ))}
-        </div>
+        <RankingList title="" bare rows={bucketRows} valueFormatter={(v) => fmtInt(v)} error={expiryBuckets.error} />
       </ExpandCard>
     </PageShell>
   );

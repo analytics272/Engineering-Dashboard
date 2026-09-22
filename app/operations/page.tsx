@@ -183,7 +183,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
         span={3}
         error={anyError}
         compare={compareOn ? { current: curTotal, prior: priTotal, priorLabel: String(priorYear), priorValueText: fmtInt(priTotal) } : undefined}
-        breakdown={byProperty.rows.slice(0, 6).map((r) => ({ label: r.property ?? '—', value: fmtInt(num(r.n)) }))}
+        breakdown={byProperty.rows.slice(0, 6).map((r) => ({ label: r.property ?? '—', value: num(r.n), display: fmtInt(num(r.n)) }))}
       />
       <KpiCard
         title="Open Complaints"

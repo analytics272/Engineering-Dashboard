@@ -174,7 +174,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
         span={3}
         error={anyError}
         compare={compareOn ? { current: curTotal, prior: priTotal, priorLabel: String(priorYear), priorValueText: fmtCurrency(priTotal) } : undefined}
-        breakdown={[...propertyTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, v]) => ({ label, value: fmtCurrency(v) }))}
+        breakdown={[...propertyTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, v]) => ({ label, value: v, display: fmtCurrency(v) }))}
       />
       <KpiCard
         title="Energy Cost / Occupied Room"

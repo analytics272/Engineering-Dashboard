@@ -176,12 +176,12 @@ assets those contracts cover.*
 | Widget | Calculation |
 |---|---|
 | **Active / Closing Soon / Expired** | computed from `end_date`, **not** the sheet's hand-typed `status`: `< today` = Expired, within 60 days = Closing Soon, else Active. |
-| **Avg AMC Cost / yr** | `AVG(yearly_cost)` per property; card shows the mean across properties. |
+| **Avg AMC Cost / yr** | `AVG(yearly_cost)` per property; card shows the mean across properties, with a **mini bar** per property underneath (not a plain list — bar length ∝ cost). |
 | **Yearly Cost by Asset Type** | donut of `SUM(yearly_cost)` by `asset_name` (Elevator, AC, Generator…). |
 | **Asset Count by Category** | ranked `COUNT(*)`. ⚠️ AMC-linked assets only — not a full inventory, and there's no internal "owner" field, only `vendor_name`. |
-| **Expiring Soonest** | next 8 contracts by `end_date`, future-dated only. |
+| **Expiring Soonest** | next 8 contracts by `end_date`, future-dated only — shown as urgency bars (`180 − days_left`, capped) rather than a plain date list: fuller + red bar = due sooner (≤30d red, ≤90d amber, else teal), text reads "in Nd". |
 | **Asset Listing** *(expand)* | full property × category breakdown with cost. |
-| **AMC Status** *(expand)* | every contract, all columns. "Sheet status" is shown for reference only — the KPIs above are computed from `end_date`. |
+| **AMC Status** *(expand)* | every contract, all columns. "Sheet status" is shown for reference only — the KPIs above are computed from `end_date`. The compact preview is a **time-to-expiry breakdown** (Expired / ≤30 / 31–90 / 90+ days / Unknown, colour-coded same as Expiring Soonest) computed across *all* contracts — not an arbitrary slice of rows. |
 
 ---
 

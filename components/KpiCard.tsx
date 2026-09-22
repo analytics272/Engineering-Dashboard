@@ -19,10 +19,13 @@ export function KpiCard({
   span?: Span;
   note?: string;
   error?: string | null;
-  breakdown?: { label: string; value: string }[];
+  /** Numeric `value` drives the mini bar's length; `display` is the formatted text next to it. */
+  breakdown?: { label: string; value: number; display: string }[];
   /** Year-over-year comparison — pass the raw current/prior numbers, not formatted strings. */
   compare?: { current: number; prior: number | null; priorLabel: string; priorValueText?: string };
 }) {
+  const max = breakdown?.length ? Math.max(1, ...breakdown.map((b) => Math.abs(b.value))) : 1;
+
   return (
     <Card title={title} span={span} note={note} error={error}>
       <div className="kpi-row">
@@ -38,9 +41,14 @@ export function KpiCard({
       {breakdown && breakdown.length > 0 && (
         <div className="kpi-breakdown">
           {breakdown.map((b) => (
-            <div className="row" key={b.label}>
-              <span>{b.label}</span>
-              <span>{b.value}</span>
+            <div className="mini-bar-row" key={b.label}>
+              <span className="mini-bar-label" title={b.label}>
+                {b.label}
+              </span>
+              <span className="mini-bar-track">
+                <span className="mini-bar" style={{ width: `${Math.max(4, (Math.abs(b.value) / max) * 100)}%` }} />
+              </span>
+              <span className="mini-bar-value">{b.display}</span>
             </div>
           ))}
         </div>

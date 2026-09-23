@@ -143,6 +143,25 @@ export function inClause(
 }
 
 // ---------------------------------------------------------------------------
+// raw_eng_bills.property uses different labels than raw_eng_tickets.property
+// for the same physical property in at least one known case (verified live
+// 2026-09-23: tickets has 'Corporate Office', bills has 'Office' — real cost
+// rows exist under 'Office' but zero exist under 'Corporate Office'). The
+// Property filter's option list is built from tickets (see getFilterOptions
+// below), so without this translation, selecting "Corporate Office" on the
+// Costs page silently matches nothing even though the data exists — it reads
+// as "no data" when it's actually a label mismatch. Extend this map if more
+// such aliases turn up (flagged in DASHBOARD-GUIDE.md's known gaps table).
+// ---------------------------------------------------------------------------
+const BILLS_PROPERTY_ALIAS: Record<string, string> = {
+  'Corporate Office': 'Office',
+};
+
+export function toBillsProperty(names: string[] | undefined): string[] | undefined {
+  return names?.map((n) => BILLS_PROPERTY_ALIAS[n] ?? n);
+}
+
+// ---------------------------------------------------------------------------
 // Filter dropdown options — distinct values from the tickets table.
 // ---------------------------------------------------------------------------
 export type FilterOptions = {

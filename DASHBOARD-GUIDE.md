@@ -145,6 +145,47 @@ contracts *right now*, cost *right now*), not a monthly series, so a
 year-over-year overlay wouldn't mean anything there. That page is a compact
 snapshot instead.
 
+## Full audit (2026-09-23) — bugs found and fixed
+
+A complete code + live-BigQuery audit (every KPI, filter, and view cross-checked
+against direct queries) found and fixed:
+
+1. **Category filter broke 4 Operations widgets.** Total Complaints, Open
+   Complaints, Closure %, and the Complaints Volume Trend queried
+   `v_complaints_weekly`, which has no `category` column — picking any
+   Category threw a live BigQuery error. Fixed by querying `raw_eng_tickets`
+   directly (verified identical totals to the view beforehand, so no numbers
+   changed for existing filter combinations).
+2. **Energy Cost was always ₹0.** `raw_eng_bills.direct_category` — the exact
+   column spec §4.6 and the dashboard filtered on — is now `NULL` for every
+   row (a full-resync-surfaced upstream sheet gap, see `NOTES-appsscript.md`
+   history). Fixed by matching on the finer-grained `category` column instead,
+   using the exact verified labels `'Electricity Charges'`, `'Utility Water'`,
+   `'Utility Water (Water Tankers)'` (already proven reliable — "Top Cost
+   Categories" was reading them correctly the whole time).
+3. **"Energy Cost / Occupied Room" showed a total-cost number under a
+   per-room title.** Retitled to "Energy Cost (Total)" with an explicit note
+   that ECOR can't be computed while `sold_rooms` is unpopulated — no
+   fabricated per-room figure is ever shown.
+4. **"Open Complaints" was scoped to the comparison year.** `status` has no
+   history, so a YoY delta for a live backlog count isn't computable — a
+   ticket opened last year and still open would've been excluded whenever
+   Compare was on. Fixed: always an unscoped live count (property/category
+   filters still apply), no YoY delta shown (there's nothing to compare it to).
+5. **`raw_eng_bills.property = 'Office'` vs `raw_eng_tickets.property =
+   'Corporate Office'`** — the Property filter's options come from tickets, so
+   selecting "Corporate Office" on Costs & Budget silently matched zero bills
+   rows even though ~₹20L of real cost exists under "Office". Fixed with an
+   explicit alias (`lib/queries.ts BILLS_PROPERTY_ALIAS`) applied only when
+   filtering bills; the UI still shows "Corporate Office" as selected.
+6. **"Total Bills Cost" always said "All categories, all properties"**, even
+   with a Property filter active. Now reflects the actual selection.
+
+Cross-checked post-fix against direct BigQuery queries (all exact matches):
+Operations `category=Plumbing` → 836 / 0 / 99.9% / 5.9h; Costs all-time →
+Energy ₹1.6 Cr / Total ₹2.6 Cr; Costs `property=Corporate Office` → Energy
+₹6.9 L / Total ₹20.4 L.
+
 ---
 
 ## Page: Operations

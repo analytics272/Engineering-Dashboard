@@ -13,6 +13,7 @@ import {
   parseCompare,
   whereFor,
   inClause,
+  toBillsProperty,
   type SearchParams,
 } from '@/lib/queries';
 import { buildSeries, buildTrendRows } from '@/lib/period';
@@ -34,7 +35,14 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   const priorYear = series.length >= 2 ? series[series.length - 2].year : null;
   const scopeLabel = currentYear != null ? String(currentYear) : 'All time';
 
-  const propWhere = whereFor(filters, { property: 'property' }, 'AND');
+  // raw_eng_bills.property uses 'Office' where tickets (the filter's source)
+  // uses 'Corporate Office' — translate before filtering bills. See
+  // toBillsProperty()/BILLS_PROPERTY_ALIAS in lib/queries.ts.
+  const propWhere = whereFor(
+    { ...filters, property: toBillsProperty(filters.property) },
+    { property: 'property' },
+    'AND',
+  );
   const currentMonths = series.find((s) => s.year === currentYear)?.months ?? [];
   const imCurrent = inClause('month', currentMonths, 'months');
 
@@ -68,7 +76,15 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
 
   const sumWhere = (rows: BillRow[], pred: (r: BillRow) => boolean) =>
     rows.filter(pred).reduce((s, r) => s + num(r.cost), 0);
-  const isEnergy = (r: BillRow) => r.direct_category === 'Electricity Charges' || r.direct_category === 'Water';
+  // spec §4.6 filters on `direct_category IN ('Electricity Charges','Water')`,
+  // but that column is now NULL for every row in raw_eng_bills (verified live
+  // — an upstream sheet/sync issue, not a query bug: the incremental sync was
+  // masking this for months by never re-reading already-synced rows; the new
+  // nightly full-resync surfaced it). The finer-grained `category` column
+  // still reliably carries the same data under these exact, verified labels.
+  const isElectricity = (r: BillRow) => r.category === 'Electricity Charges';
+  const isWater = (r: BillRow) => r.category === 'Utility Water' || r.category === 'Utility Water (Water Tankers)';
+  const isEnergy = (r: BillRow) => isElectricity(r) || isWater(r);
 
   const curEnergy = sumWhere(curBills, isEnergy);
   const priEnergy = priBills ? sumWhere(priBills, isEnergy) : null;
@@ -88,8 +104,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
 
   // ---- current series: electricity vs water split -----------------------------
   const utilitySplit = [
-    { name: 'Electricity', cost: sumWhere(curBills, (r) => r.direct_category === 'Electricity Charges') },
-    { name: 'Water', cost: sumWhere(curBills, (r) => r.direct_category === 'Water') },
+    { name: 'Electricity', cost: sumWhere(curBills, isElectricity) },
+    { name: 'Water', cost: sumWhere(curBills, isWater) },
   ].filter((d) => d.cost > 0);
 
   // ---- current series: top cost categories ------------------------------------
@@ -170,19 +186,19 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
       <KpiCard
         title="Total Bills Cost"
         value={fmtCurrency(curTotal)}
-        sub="All categories, all properties"
+        sub={`All categories${filters.property?.length ? ` · ${filters.property.join(', ')}` : ' · all properties'}`}
         span={3}
         error={anyError}
         compare={compareOn ? { current: curTotal, prior: priTotal, priorLabel: String(priorYear), priorValueText: fmtCurrency(priTotal) } : undefined}
         breakdown={[...propertyTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, v]) => ({ label, value: v, display: fmtCurrency(v) }))}
       />
       <KpiCard
-        title="Energy Cost / Occupied Room"
+        title="Energy Cost (Total)"
         value={fmtCurrency(curEnergy)}
-        sub="Shows total cost — sold_rooms is 0 for every row today"
+        sub="ECOR (per occupied room) not shown — sold_rooms is unpopulated"
         span={3}
         error={anyError}
-        note="🚩 ECOR = energy_cost ÷ sold_rooms (spec §4.6). Will switch to the true per-room figure automatically once sold_rooms is populated."
+        note="🚩 Spec §4.6 defines this as energy_cost ÷ sold_rooms. sold_rooms is NULL/0 for every row, so a real per-room figure can't be computed — showing the total cost here instead of a fabricated per-room number. Will switch automatically once sold_rooms is populated."
       />
       <KpiCard
         title={`Budget Spend${scope}`}

@@ -52,18 +52,25 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
   // Every query below is independent of every other — fire them all together
   // instead of one BigQuery round trip at a time (this was the main source of
   // page load being slow: ~10 sequential round trips became 1 parallel wave).
-  const [complaintsBySeries, byProperty, escalation, ageingBySeries, worstCategories, mttrFull] =
+  const [complaintsBySeries, byProperty, openNow, escalation, ageingBySeries, worstCategories, mttrFull] =
     await Promise.all([
       // ---- per-series: complaints volume + open/closed, by month -------------
+      // Queries raw_eng_tickets directly, NOT v_complaints_weekly — that view
+      // has no `category` column (week, property, logged_month, month_number,
+      // total_complaints, closed_complaints, open_complaints, closure_pct
+      // only), so appending a category filter to it throws "Unrecognized name:
+      // category" the moment a user picks a Category on this page. Verified
+      // this produces identical totals to the view when no category filter is
+      // active (SUM(total_complaints)=COUNT(*), etc. — same underlying rows).
       Promise.all(
         series.map(async ({ year, months }) => {
           const im = inClause('logged_month', months, 'months');
           const { rows, error } = await safeQuery<WeeklyRow>(
             `SELECT logged_month,
-                    SUM(total_complaints) AS total_complaints,
-                    SUM(open_complaints)  AS open_complaints,
-                    SUM(closed_complaints) AS closed_complaints
-             FROM \`${VIEWS.complaintsWeekly}\`
+                    COUNT(*) AS total_complaints,
+                    COUNTIF(status = 'Open') AS open_complaints,
+                    COUNTIF(status = 'Closed') AS closed_complaints
+             FROM \`${TABLES.tickets}\`
              ${im.clause} ${propWhere.clause} ${catWhere.clause}
              GROUP BY logged_month`,
             { ...im.params, ...propWhere.params, ...catWhere.params },
@@ -79,6 +86,16 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
          ${imCurrent.clause} ${propWhere.clause} ${catWhere.clause}
          GROUP BY 1 ORDER BY n DESC`,
         { ...imCurrent.params, ...propWhere.params, ...catWhere.params },
+      ),
+
+      // ---- open backlog RIGHT NOW — deliberately NOT scoped to a month/year.
+      // `status` is a mutable current-state field with no history table, so
+      // "open complaints as of last year" isn't a computable thing — Open
+      // Complaints is a live snapshot (property/category filters still apply),
+      // not a period total, and never gets a YoY delta.
+      safeQuery<{ n: unknown }>(
+        `SELECT COUNTIF(status = 'Open') AS n FROM \`${TABLES.tickets}\` WHERE TRUE ${propWhere.clause} ${catWhere.clause}`,
+        { ...propWhere.params, ...catWhere.params },
       ),
 
       // ---- current series: escalation split -----------------------------------
@@ -135,8 +152,9 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
   const priComplaints = compareOn ? findSeries(complaintsBySeries, priorYear) : undefined;
   const curTotal = curComplaints ? sumField(curComplaints.rows, 'total_complaints') : 0;
   const priTotal = priComplaints ? sumField(priComplaints.rows, 'total_complaints') : null;
-  const curOpen = curComplaints ? sumField(curComplaints.rows, 'open_complaints') : 0;
-  const priOpen = priComplaints ? sumField(priComplaints.rows, 'open_complaints') : null;
+  // Live backlog snapshot — NOT derived from complaintsBySeries (which is
+  // scoped to the current comparison period). See openNow query comment above.
+  const curOpen = num(openNow.rows[0]?.n);
   const curClosed = curComplaints ? sumField(curComplaints.rows, 'closed_complaints') : 0;
   const priClosed = priComplaints ? sumField(priComplaints.rows, 'closed_complaints') : null;
   const curClosurePct = curTotal ? (curClosed * 100) / curTotal : null;
@@ -153,6 +171,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
     escalation.error ??
     ageingBySeries.find((a) => a.error)?.error ??
     null;
+  const openError = openNow.error;
 
   // ---- trend chart data ---------------------------------------------------
   const complaintsTrend = buildTrendRows(
@@ -188,9 +207,9 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
       <KpiCard
         title="Open Complaints"
         value={fmtInt(curOpen)}
+        sub="Live backlog right now — not scoped to a period, no YoY (status has no history)"
         span={3}
-        error={anyError}
-        compare={compareOn ? { current: curOpen, prior: priOpen, priorLabel: String(priorYear), priorValueText: fmtInt(priOpen) } : undefined}
+        error={openError}
       />
       <KpiCard
         title="Closure %"

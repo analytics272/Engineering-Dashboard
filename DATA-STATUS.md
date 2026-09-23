@@ -1,5 +1,22 @@
 # Live data check — 2026-08-27
 
+## 🔴 2026-09-23 — `raw_eng_bills.direct_category` is now NULL for every row
+
+Surfaced by the first nightly `fullResyncNow` run (`synced_at` for all 2924
+bill rows is a single 2026-09-22T21:29Z batch — a full reload, not
+incremental). Spec §4.6's exact filter, `direct_category IN ('Electricity
+Charges','Water')`, now matches 0 rows — this made Energy Cost / ECOR /
+Electricity vs Water always show ₹0 (fixed dashboard-side by matching on
+`category` instead — see DASHBOARD-GUIDE.md's audit section). The
+`direct_category` column itself is still broken upstream: whoever maintains
+the sheet should check whether the Bills tab's "Direct Category" column is
+still populated, and if not, either repopulate it or remove the column from
+`ENG_SHEET_CONFIG` — the dashboard no longer depends on it, but the BigQuery
+view `v_ecor` (unused by the app, kept for spec-compliance) still does and
+will keep returning 0 rows until this is fixed at the source.
+
+
+
 Ran against `skyla-analytics.Skyla_Engineering_Automation` with the read-only
 service account. Dataset + table names all match the spec (§3). All 11 core
 views created and queryable. **All pages render real data — safe to deploy.**

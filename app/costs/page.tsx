@@ -90,6 +90,12 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   const priEnergy = priBills ? sumWhere(priBills, isEnergy) : null;
   const curTotal = sumWhere(curBills, () => true);
   const priTotal = priBills ? sumWhere(priBills, () => true) : null;
+  // A summed ₹0 is ambiguous: it could mean "checked, genuinely zero cost" or
+  // "no electricity/water bill has been logged for this scope at all" (e.g. a
+  // recent month whose utility bill hasn't arrived yet, while maintenance
+  // costs for the same month already have). Track row presence separately so
+  // the KPI can say "No data" instead of a misleading "₹0" in the latter case.
+  const hasEnergyRows = curBills.some(isEnergy);
 
   // ---- trend: total bills cost, one line per series --------------------------
   const monthlyBillTotals = billsBySeries.map((s) => {
@@ -178,10 +184,11 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
     <PageShell title="Costs & Budget" showCompare filters={['month', 'property', 'quarter']}>
       <KpiCard
         title="Energy Cost (Elec + Water)"
-        value={fmtCurrency(curEnergy)}
+        value={hasEnergyRows ? fmtCurrency(curEnergy) : 'No data'}
+        sub={hasEnergyRows ? undefined : 'No electricity/water bill logged yet for this scope'}
         span={3}
         error={anyError}
-        compare={compareOn ? { current: curEnergy, prior: priEnergy, priorLabel: String(priorYear), priorValueText: fmtCurrency(priEnergy) } : undefined}
+        compare={hasEnergyRows && compareOn ? { current: curEnergy, prior: priEnergy, priorLabel: String(priorYear), priorValueText: fmtCurrency(priEnergy) } : undefined}
       />
       <KpiCard
         title="Total Bills Cost"
@@ -194,8 +201,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
       />
       <KpiCard
         title="Energy Cost (Total)"
-        value={fmtCurrency(curEnergy)}
-        sub="ECOR (per occupied room) not shown — sold_rooms is unpopulated"
+        value={hasEnergyRows ? fmtCurrency(curEnergy) : 'No data'}
+        sub={hasEnergyRows ? 'ECOR (per occupied room) not shown — sold_rooms is unpopulated' : 'No electricity/water bill logged yet for this scope'}
         span={3}
         error={anyError}
         note="🚩 Spec §4.6 defines this as energy_cost ÷ sold_rooms. sold_rooms is NULL/0 for every row, so a real per-room figure can't be computed — showing the total cost here instead of a fabricated per-room number. Will switch automatically once sold_rooms is populated."

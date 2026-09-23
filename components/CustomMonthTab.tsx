@@ -43,7 +43,7 @@ export function CustomMonthTab({
           setOpen((o) => !o);
         }}
       >
-        {active ? value : 'Custom Month…'}
+        Custom Month
       </button>
       {open && (
         <div className="custom-panel">

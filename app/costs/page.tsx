@@ -19,6 +19,20 @@ import {
 import { buildSeries, buildTrendRows } from '@/lib/period';
 import { fmtCurrency, monthKey } from '@/lib/format';
 
+// raw_eng_bills has no `quarter` column, so a Quarter filter has to be
+// translated into the month labels it covers before it can scope bills —
+// otherwise it silently does nothing to Energy Cost / Total Bills Cost /
+// Electricity vs Water (only ever applied to the raw_eng_looker_data-driven
+// Budget cards), which reads as "I picked Q2, why is this still showing a
+// different period's numbers" (verified live: Jul 26 has real electricity
+// bills, but was invisible under any quarter filter before this fix).
+function scopeMonthsToQuarter(months: string[], quarter: string | undefined, quarterMonthIdxs: Record<string, number[]>): string[] {
+  if (!quarter) return months;
+  const idxs = quarterMonthIdxs[quarter];
+  if (!idxs) return months;
+  return months.filter((m) => idxs.includes(monthKey(m) % 12));
+}
+
 export const dynamic = 'force-dynamic';
 
 const seriesKey = (year: number | null) => (year != null ? String(year) : 'value');
@@ -52,7 +66,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
     // ---- per-series: all bills, by month + category (drives every KPI/trend below) --
     Promise.all(
       series.map(async ({ year, months }) => {
-        const im = inClause('month', months, 'months');
+        const im = inClause('month', scopeMonthsToQuarter(months, filters.quarter, options.quarterMonthIdxs), 'months');
         const { rows, error } = await safeQuery<BillRow>(
           `SELECT month, property, category, direct_category, SUM(bill_value) AS cost
            FROM \`${TABLES.bills}\`

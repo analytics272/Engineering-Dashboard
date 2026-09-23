@@ -2,6 +2,7 @@ import 'server-only';
 import { cache } from 'react';
 import { DATASET, safeQuery } from './bigquery';
 import { availableYears } from './period';
+import { monthKey } from './format';
 
 // ---------------------------------------------------------------------------
 // Fully-qualified object names. Centralised so a rename is a one-line fix.
@@ -173,6 +174,15 @@ export type FilterOptions = {
   billMonths: string[];
   /** every calendar year seen across tickets + bills — feeds the Compare Years picker, fully data-driven */
   years: number[];
+  /**
+   * quarter label -> the calendar month-of-year indices (0=Jan..11=Dec) it
+   * covers, derived from raw_eng_looker_data's own quarter+month pairs (e.g.
+   * verified live: this business's fiscal Q1 = Apr/May/Jun, Q2 = Jul/Aug/Sep
+   * — NOT the calendar-year Q1=Jan-Mar an English label might suggest).
+   * `raw_eng_bills` has no quarter column, so the Costs page uses this to
+   * translate a Quarter filter into the month labels needed to scope bills.
+   */
+  quarterMonthIdxs: Record<string, number[]>;
   lastUpdated: string | null;
   error: string | null;
 };
@@ -195,9 +205,11 @@ export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
       `SELECT DISTINCT property, category, logged_month, month_number
        FROM \`${TABLES.tickets}\``,
     ),
-    // Quarters (Budget breakdown) + month labels (Costs page trend) — raw_eng_looker_data / raw_eng_bills.
-    safeQuery<{ quarter: string | null }>(
-      `SELECT DISTINCT quarter FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL ORDER BY quarter`,
+    // Quarters (Budget breakdown) + which calendar months each quarter covers —
+    // raw_eng_looker_data is the only table with a quarter column, so this pair
+    // is also how the Costs page maps a Quarter filter onto raw_eng_bills.month.
+    safeQuery<{ quarter: string | null; month: string | null }>(
+      `SELECT DISTINCT quarter, month FROM \`${TABLES.looker}\` WHERE quarter IS NOT NULL AND month IS NOT NULL ORDER BY quarter`,
     ),
     safeQuery<{ month: string | null }>(
       `SELECT DISTINCT month FROM \`${TABLES.bills}\` WHERE month IS NOT NULL`,
@@ -216,6 +228,7 @@ export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
       quarters: [],
       billMonths: [],
       years: [],
+      quarterMonthIdxs: {},
       lastUpdated: null,
       error,
     };
@@ -231,13 +244,23 @@ export const getFilterOptions = cache(async (): Promise<FilterOptions> => {
   }
   const months = [...monthOrder.entries()].sort((a, b) => a[1] - b[1]).map(([m]) => m).slice(0, 24);
 
-  const quarters = clean(q.rows.map((r) => r.quarter), 12);
+  const quarters = clean([...new Set(q.rows.map((r) => r.quarter))], 12);
   const billMonths = clean(bm.rows.map((r) => r.month), 60);
   const years = availableYears([...months, ...billMonths]);
+
+  const quarterMonthIdxs: Record<string, number[]> = {};
+  for (const r of q.rows) {
+    if (!r.quarter || !r.month) continue;
+    const k = monthKey(r.month);
+    if (k === Number.MAX_SAFE_INTEGER) continue;
+    const idx = k % 12;
+    const set = quarterMonthIdxs[r.quarter] ?? (quarterMonthIdxs[r.quarter] = []);
+    if (!set.includes(idx)) set.push(idx);
+  }
 
   const rawTs = stamp.rows[0]?.ts;
   const lastUpdated =
     (typeof rawTs === 'object' && rawTs ? rawTs.value : (rawTs as string | null)) ?? null;
 
-  return { properties, categories, months, quarters, billMonths, years, lastUpdated, error: null };
+  return { properties, categories, months, quarters, billMonths, years, quarterMonthIdxs, lastUpdated, error: null };
 });

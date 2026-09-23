@@ -90,8 +90,17 @@ export function buildSeries(
   monthFilter?: string,
 ): Series[] {
   if (!compareOn) {
-    const months = monthFilter
-      ? allLabels.filter((l): l is string => !!l && l === monthFilter)
+    // Match by parsed calendar month (monthKey), not raw string equality —
+    // `monthFilter` comes from whichever table drives the Month filter UI
+    // (e.g. bills' "Aug 26"), but this function also scopes OTHER tables
+    // that store the same month under a different text format (e.g.
+    // raw_eng_looker_data's "Aug-26"). A literal `l === monthFilter` silently
+    // matched nothing for those tables — Budget Spend showed "No data" for
+    // any specific month with Compare off, even though the same month worked
+    // fine with Compare on (planYearSeries below already used monthKey).
+    const targetKey = monthFilter ? monthKey(monthFilter) : null;
+    const months = targetKey != null
+      ? allLabels.filter((l): l is string => !!l && monthKey(l) === targetKey)
       : allLabels.filter((l): l is string => !!l);
     return [{ year: null, months: [...new Set(months)] }];
   }

@@ -307,22 +307,10 @@ a {
   flex-shrink: 0;
 }
 
-.compare-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--text-faint);
-  flex-shrink: 0;
-}
-
 .compare-toggle-on {
   background: var(--teal);
   border-color: var(--teal);
   color: #fff;
-}
-
-.compare-toggle-on .compare-dot {
-  background: #fff;
 }
 
 /* Property / Category / Quarter pills */

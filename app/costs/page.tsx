@@ -96,6 +96,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   // costs for the same month already have). Track row presence separately so
   // the KPI can say "No data" instead of a misleading "₹0" in the latter case.
   const hasEnergyRows = curBills.some(isEnergy);
+  const hasBillsRows = curBills.length > 0;
 
   // ---- trend: total bills cost, one line per series --------------------------
   const monthlyBillTotals = billsBySeries.map((s) => {
@@ -153,8 +154,8 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
 
   const budgetFor = (months: string[]) => {
     const im = inClause('month', months, 'months');
-    return safeQuery<{ amount: unknown }>(
-      `SELECT SUM(amount) AS amount FROM \`${TABLES.looker}\` ${im.clause} ${quarterWhere.clause}`,
+    return safeQuery<{ amount: unknown; n: unknown }>(
+      `SELECT SUM(amount) AS amount, COUNT(*) AS n FROM \`${TABLES.looker}\` ${im.clause} ${quarterWhere.clause}`,
       { ...im.params, ...quarterWhere.params },
     );
   };
@@ -171,6 +172,7 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
   ]);
   const curBudget = num(budgetCur.rows[0]?.amount);
   const priBudget = compareOn ? num(budgetPri.rows[0]?.amount) : null;
+  const hasBudgetRows = num(budgetCur.rows[0]?.n) > 0;
 
   const seriesColor = (i: number, total: number) => (i === total - 1 ? '#0f5b52' : '#8fb8b1');
   const chartSeries = series.map((s, i) => ({
@@ -192,11 +194,11 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
       />
       <KpiCard
         title="Total Bills Cost"
-        value={fmtCurrency(curTotal)}
-        sub={`All categories${filters.property?.length ? ` · ${filters.property.join(', ')}` : ' · all properties'}`}
+        value={hasBillsRows ? fmtCurrency(curTotal) : 'No data'}
+        sub={hasBillsRows ? `All categories${filters.property?.length ? ` · ${filters.property.join(', ')}` : ' · all properties'}` : 'No bills logged yet for this scope'}
         span={3}
         error={anyError}
-        compare={compareOn ? { current: curTotal, prior: priTotal, priorLabel: String(priorYear), priorValueText: fmtCurrency(priTotal) } : undefined}
+        compare={hasBillsRows && compareOn ? { current: curTotal, prior: priTotal, priorLabel: String(priorYear), priorValueText: fmtCurrency(priTotal) } : undefined}
         breakdown={[...propertyTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, v]) => ({ label, value: v, display: fmtCurrency(v) }))}
       />
       <KpiCard
@@ -209,11 +211,11 @@ export default async function CostsPage({ searchParams }: { searchParams: Search
       />
       <KpiCard
         title={`Budget Spend${scope}`}
-        value={fmtCurrency(curBudget)}
-        sub="raw_eng_looker_data, SUM(amount)"
+        value={hasBudgetRows ? fmtCurrency(curBudget) : 'No data'}
+        sub={hasBudgetRows ? 'raw_eng_looker_data, SUM(amount)' : 'No budget rows logged yet for this scope'}
         span={3}
         error={budgetCur.error}
-        compare={compareOn ? { current: curBudget, prior: priBudget, priorLabel: String(priorYear), priorValueText: fmtCurrency(priBudget) } : undefined}
+        compare={hasBudgetRows && compareOn ? { current: curBudget, prior: priBudget, priorLabel: String(priorYear), priorValueText: fmtCurrency(priBudget) } : undefined}
       />
 
       <TrendChartCard

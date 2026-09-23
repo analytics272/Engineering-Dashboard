@@ -83,12 +83,17 @@ GROUP BY property;
 -- 4.6  v_ecor — Energy Consumption & Cost per Occupied Room
 --      🚩 sold_rooms is currently 0 for every row, so `ecor` is NULL until that
 --      column is populated. `energy_cost` works today; wire the widget now.
+--      Filters on `category`, not `direct_category` — verified live 2026-09-23
+--      that direct_category is NULL for ~97% of rows (populated only as
+--      'General Repairs' for one unrelated batch), while `category` reliably
+--      carries 'Electricity Charges' / 'Utility Water' / 'Utility Water (Water
+--      Tankers)'. See app/costs/page.tsx for the same fix applied dashboard-side.
 CREATE OR REPLACE VIEW `skyla-analytics.Skyla_Engineering_Automation.v_ecor` AS
 SELECT property, month,
        SUM(bill_value) AS energy_cost,
        SUM(bill_value) / NULLIF(SUM(sold_rooms), 0) AS ecor
 FROM `skyla-analytics.Skyla_Engineering_Automation.raw_eng_bills`
-WHERE direct_category IN ('Electricity Charges', 'Water')
+WHERE category IN ('Electricity Charges', 'Utility Water', 'Utility Water (Water Tankers)')
 GROUP BY property, month;
 
 

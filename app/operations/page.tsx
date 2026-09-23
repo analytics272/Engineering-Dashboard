@@ -157,8 +157,16 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
   const curOpen = num(openNow.rows[0]?.n);
   const curClosed = curComplaints ? sumField(curComplaints.rows, 'closed_complaints') : 0;
   const priClosed = priComplaints ? sumField(priComplaints.rows, 'closed_complaints') : null;
-  const curClosurePct = curTotal ? (curClosed * 100) / curTotal : null;
-  const priClosurePct = priTotal && priClosed != null ? (priClosed * 100) / priTotal : null;
+  // Closure % denominator excludes Cancelled tickets (status has a 3rd value
+  // besides Open/Closed — verified live, 5 rows currently). A cancelled
+  // ticket was voided, not left open, so counting it against closure% would
+  // understate closure for a reason that has nothing to do with backlog.
+  const curOpenPeriod = curComplaints ? sumField(curComplaints.rows, 'open_complaints') : 0;
+  const priOpenPeriod = priComplaints ? sumField(priComplaints.rows, 'open_complaints') : null;
+  const curClosureBase = curClosed + curOpenPeriod;
+  const priClosureBase = priClosed != null && priOpenPeriod != null ? priClosed + priOpenPeriod : null;
+  const curClosurePct = curClosureBase ? (curClosed * 100) / curClosureBase : null;
+  const priClosurePct = priClosureBase && priClosed != null ? (priClosed * 100) / priClosureBase : null;
 
   const curAgeing = findSeries(ageingBySeries, currentYear);
   const priAgeing = compareOn ? findSeries(ageingBySeries, priorYear) : undefined;
@@ -214,7 +222,7 @@ export default async function OperationsPage({ searchParams }: { searchParams: S
       <KpiCard
         title="Closure %"
         value={fmtPct(curClosurePct)}
-        sub={`${fmtInt(curClosed)} of ${fmtInt(curTotal)} closed`}
+        sub={`${fmtInt(curClosed)} of ${fmtInt(curClosureBase)} closed (excl. cancelled)`}
         span={3}
         error={anyError}
         compare={compareOn ? { current: curClosurePct ?? 0, prior: priClosurePct, priorLabel: String(priorYear), priorValueText: fmtPct(priClosurePct) } : undefined}

@@ -4,11 +4,14 @@ import { Filters } from './Filters';
 import { Logo } from './Logo';
 import { getFilterOptions, DEFAULT_FILTERS, type FilterKey } from '@/lib/queries';
 
-// The Apps Script sync (Sync.gs) is meant to run every 2 hours. Past 3x that
-// interval with no update, something's actually wrong upstream (trigger
-// disabled, auth expired, quota hit) — worth a loud warning, not a quiet
-// sidebar timestamp nobody notices until the numbers look wrong.
-const STALE_AFTER_HOURS = 6;
+// syncAll runs every 2h but is incremental — it only advances synced_at when
+// a row is new or edited, so on a quiet day (no sheet changes) the stamp can
+// legitimately sit still for most of a day even though the trigger is firing
+// fine. The nightly fullResyncNow (2-3 AM IST, Triggers.gs) is the real
+// heartbeat: it rewrites every row regardless, so synced_at is guaranteed to
+// move at least once every ~24h if the pipeline is healthy. Flag staleness
+// only once that heartbeat itself is overdue, not on ordinary quiet hours.
+const STALE_AFTER_HOURS = 30;
 
 function hoursSince(iso: string | null): number | null {
   if (!iso) return null;
@@ -68,7 +71,7 @@ export async function PageShell({
         <div className="sidebar-footer">
           <div
             className={stale ? 'sidebar-stamp sidebar-stamp-stale' : 'sidebar-stamp'}
-            title="Data last synced from the sheet (Apps Script runs every 2h)"
+            title="Data last synced from the sheet (incremental sync every 2h, full resync nightly 2-3 AM IST)"
           >
             Last Updated
             <span>
@@ -96,9 +99,11 @@ export async function PageShell({
 
         {!options.error && stale && (
           <div className="banner warn">
-            ⚠ Data last synced {relativeAge(age!)} (expected every ~2h) — the sheet may have
-            changed since. The Apps Script <code>syncAll</code> trigger has likely stopped; check
-            its Executions log in the Apps Script editor.
+            ⚠ No new or edited rows have synced in {relativeAge(age!)}. This is usually normal —
+            <code>syncAll</code> runs every 2h but only touches new/changed rows, so the stamp
+            doesn&apos;t move on a quiet day, and the nightly full resync (2–3 AM IST) refreshes
+            everything regardless. Only worth checking the Apps Script Executions log if this
+            banner is still showing after that nightly run.
           </div>
         )}
 
